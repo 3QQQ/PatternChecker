@@ -38,3 +38,16 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+.local-repo/
+fetch-deps.ps1
+build-loop.ps1
+
+### Local inspection / dependency artifacts ###
+.codex-tmp/
+.gradle-codex/
+/appeng/
+/assets/
+/data/
+/META-INF/
+/libs/
+/gcm-diagnose.log

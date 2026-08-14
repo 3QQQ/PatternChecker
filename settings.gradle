@@ -1,5 +1,9 @@
 pluginManagement {
     repositories {
+        maven {
+            name = 'LocalMirror'
+            url = uri("${rootDir}/.local-repo")
+        }
         gradlePluginPortal()
     }
 }

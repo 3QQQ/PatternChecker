@@ -1,8 +1,4 @@
-# This is an example neoforge.mods.toml file. It contains the data relating to the loading mods.
-# There are several mandatory fields (#mandatory), and many more that are optional (#optional).
-# The overall format is standard TOML format, v0.5.0.
-# Note that there are a couple of TOML lists in this file.
-# Find more information on toml format here:  https://github.com/toml-lang/toml
+# NeoForge mod metadata for the Pattern Checker addon.
 
 # The name of the mod loader type to load - for regular FML @Mod mods it should be javafml
 modLoader="javafml" #mandatory
@@ -46,7 +42,8 @@ displayName="${mod_name}" #mandatory
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Example mod description.
+An Applied Energistics 2 addon that scans ME networks for broken or
+unfulfillable patterns and reports them in chat.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
@@ -86,6 +83,28 @@ Example mod description.
     # This version range declares a minimum of the current minecraft version up to but not including the next major version
     versionRange="${minecraft_version_range}"
     ordering="NONE"
+    side="BOTH"
+
+# Dependency on Applied Energistics 2, the mod this addon extends.
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    type="required"
+    versionRange="[19.2.17,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="curios"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="accessories"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
     side="BOTH"
 
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares

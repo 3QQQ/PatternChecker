@@ -28,6 +28,12 @@ sourceSets.main.resources {
 }
 
 repositories {
+    // Local mirror first: avoids flaky downloads from maven.neoforged.net for
+    // artifacts that are already present in .local-repo.
+    maven {
+        name = 'LocalMirror'
+        url = uri("${projectDir}/.local-repo")
+    }
     // Add here additional repositories if required by some of the dependencies below.
 }
 
@@ -47,8 +53,9 @@ neoForge {
         minecraftVersion = project.parchment_minecraft_version
     }
 
-    // This line is optional. Access Transformers are automatically detected
-    // accessTransformers = project.files('src/main/resources/META-INF/accesstransformer.cfg')
+    // Needed so the pattern editor can scroll its grid: AE2-style editors
+    // reposition slots by writing their x/y coordinates.
+    accessTransformers = project.files('src/main/resources/META-INF/accesstransformer.cfg')
 
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
@@ -123,6 +130,17 @@ dependencies {
     // We add the full version to localRuntime, not runtimeOnly, so that we do not publish a dependency on it
     // localRuntime "mezz.jei:jei-${mc_version}-neoforge:${jei_version}"
 
+    // Applied Energistics 2 (addon target). The jar is provided locally in ./libs.
+    implementation files("libs/appliedenergistics2-${ae2_version}.jar")
+
+    // GuideME is a required runtime dependency of AE2, needed to boot the dev client.
+    localRuntime files("libs/guideme-21.1.17.jar")
+
+    // AE2 Lightning Tech (AE2LT) adds its own pattern-holding machines.
+    // Compile-only: the modpack provides them at runtime.
+    compileOnly files("libs/ae2lt-2.0.7.jar")
+    compileOnly files("libs/thunderbolt-1.0.3.jar")
+
     // Example mod dependency using a mod jar from ./libs with a flat dir repository
     // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
     // The group id is ignored when searching -- in this case, it is "blank"
@@ -147,6 +165,7 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
             minecraft_version_range: minecraft_version_range,
             neo_version            : neo_version,
             loader_version_range   : loader_version_range,
+            ae2_version            : ae2_version,
             mod_id                 : mod_id,
             mod_name               : mod_name,
             mod_license            : mod_license,
