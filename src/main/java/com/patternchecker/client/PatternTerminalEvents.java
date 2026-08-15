@@ -11,6 +11,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -23,8 +24,9 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Adds a pattern-checker module to the left edge of the AE2 pattern encoding
@@ -40,36 +42,69 @@ public final class PatternTerminalEvents {
     private static final int MODULE_GAP = 4;
     private static int savedOffsetX;
     private static int savedOffsetY;
-    private static PatternEncodingTermScreen<?> activeScreen;
+    private static Screen activeScreen;
     private static ToolPanel activePanel;
+    private static EntryKey persistedSelectionKey;
+
+    private record EntryKey(String location, int slot) {
+    }
 
     private PatternTerminalEvents() {
     }
 
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
-        if (!(event.getScreen() instanceof PatternEncodingTermScreen<?> screen)) {
+        Screen screen = event.getScreen();
+        if (!isPatternEncodingScreen(screen)) {
             activeScreen = null;
             activePanel = null;
             return;
         }
         NetworkHandler.clearPendingToolList();
-        PatternCheckClient.resetToolList();
-        int moduleHeight = Math.min(MODULE_HEIGHT, screen.getYSize());
+        int moduleHeight = Math.min(MODULE_HEIGHT, screenHeight(screen));
         int anchorX = MODULE_GAP;
         int anchorY = Minecraft.getInstance().getWindow().getGuiScaledHeight()
                 - moduleHeight - MODULE_GAP;
+        EntryKey selectionKey = activePanel != null ? activePanel.selectedKey : persistedSelectionKey;
         ToolPanel panel = new ToolPanel(
                 anchorX + savedOffsetX,
                 anchorY + savedOffsetY,
                 MODULE_WIDTH,
                 moduleHeight,
                 anchorX,
-                anchorY);
+                anchorY,
+                selectionKey);
         activeScreen = screen;
         activePanel = panel;
-        PacketDistributor.sendToServer(new PatternToolActionPayload(
-                PatternToolActionPayload.ACTION_SYNC, -1));
+    }
+
+    /**
+     * AE2 add-ons commonly provide their own screen implementation while
+     * keeping the same PatternEncodingTermMenu hierarchy. Avoid hard links to
+     * optional add-on classes: detect the vanilla screen directly and use the
+     * stable class-name convention for compatible add-on screens.
+     */
+    private static boolean isPatternEncodingScreen(Screen screen) {
+        if (screen instanceof PatternEncodingTermScreen<?>) {
+            return true;
+        }
+        return screen != null
+                && screen.getClass().getName().contains("PatternEncodingTermScreen");
+    }
+
+    private static int screenHeight(Screen screen) {
+        if (screen instanceof PatternEncodingTermScreen<?> vanilla) {
+            return vanilla.getYSize();
+        }
+        try {
+            var method = screen.getClass().getMethod("getYSize");
+            Object value = method.invoke(screen);
+            if (value instanceof Number number && number.intValue() > 0) {
+                return number.intValue();
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+        return MODULE_HEIGHT;
     }
 
     @SubscribeEvent
@@ -162,17 +197,26 @@ public final class PatternTerminalEvents {
 
         private int scroll;
         private int selected = -1;
+        private EntryKey selectedKey;
         private final int anchorX;
         private final int anchorY;
         private int capturedButton = -1;
         private boolean dragging;
         private int dragOffsetX;
         private int dragOffsetY;
+        private int syncDelayFrames = 12;
+        private boolean syncRequested;
+        private List<ToolListPayload.Entry> cachedEntries = List.of();
+        private Map<Integer, ToolListPayload.Entry> entriesByIndex = Map.of();
+        private final Map<String, ItemStack> iconCache = new HashMap<>();
 
-        ToolPanel(int x, int y, int width, int height, int anchorX, int anchorY) {
+        ToolPanel(int x, int y, int width, int height, int anchorX, int anchorY,
+                  EntryKey selectionKey) {
             super(x, y, width, height, Component.translatable("patternchecker.menu.title"));
             this.anchorX = anchorX;
             this.anchorY = anchorY;
+            this.selectedKey = selectionKey;
+            refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
 
             int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
@@ -237,20 +281,11 @@ public final class PatternTerminalEvents {
         }
 
         private List<ToolListPayload.Entry> entries() {
-            List<ToolListPayload.Entry> entries =
-                    new ArrayList<>(PatternCheckClient.getToolList().entries());
-            entries.sort(Comparator.comparingInt(ToolListPayload.Entry::category)
-                    .thenComparingInt(ToolListPayload.Entry::index));
-            return entries;
+            return cachedEntries;
         }
 
         private ToolListPayload.Entry selectedEntry() {
-            for (ToolListPayload.Entry entry : entries()) {
-                if (entry.index() == selected) {
-                    return entry;
-                }
-            }
-            return null;
+            return entriesByIndex.get(selected);
         }
 
         private boolean hasSelectedProvider() {
@@ -303,10 +338,15 @@ public final class PatternTerminalEvents {
             List<ToolListPayload.Entry> entries = entries();
             int row = ((int) mouseY - listTop) / ROW_HEIGHT + scroll;
             if (row >= 0 && row < entries.size()) {
-                selected = entries.get(row).index();
+                ToolListPayload.Entry entry = entries.get(row);
+                selected = entry.index();
+                selectedKey = keyOf(entry);
+                persistedSelectionKey = selectedKey;
                 sendAction(PatternToolActionPayload.ACTION_SELECT, selected);
             } else {
                 selected = -1;
+                selectedKey = null;
+                persistedSelectionKey = null;
             }
             return true;
         }
@@ -384,16 +424,35 @@ public final class PatternTerminalEvents {
 
         @Override
         protected void renderWidget(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
+            if (!syncRequested) {
+                if (syncDelayFrames > 0) {
+                    syncDelayFrames--;
+                } else {
+                    sendAction(PatternToolActionPayload.ACTION_SYNC, -1);
+                    syncRequested = true;
+                }
+            }
             ToolListPayload polled = NetworkHandler.poll();
             if (polled != null) {
                 PatternCheckClient.setToolList(polled);
-                selected = -1;
+                refreshEntries(polled);
+                selected = findMatchingEntry(polled.entries(), selectedKey);
+                if (selected < 0) {
+                    selectedKey = null;
+                    persistedSelectionKey = null;
+                }
                 scroll = 0;
             }
             ToolListPayload payload = PatternCheckClient.getToolList();
+            if (cachedEntries.isEmpty() && !payload.entries().isEmpty()) {
+                refreshEntries(payload);
+            }
             setButtonsVisible(payload.available());
             if (!payload.available()) {
                 return;
+            }
+            if (selected < 0 && selectedKey != null) {
+                selected = findMatchingEntry(payload.entries(), selectedKey);
             }
             updateButtons(payload);
 
@@ -410,6 +469,45 @@ public final class PatternTerminalEvents {
 
             renderList(gui, mouseX, mouseY);
             renderStatus(gui, payload);
+        }
+
+        private void refreshEntries(ToolListPayload payload) {
+            // The server list is already indexed by entry number. Bucket by
+            // the small category range instead of comparator-sorting thousands
+            // of entries every time a terminal screen is initialized.
+            Map<Integer, List<ToolListPayload.Entry>> buckets = new HashMap<>();
+            for (ToolListPayload.Entry entry : payload.entries()) {
+                buckets.computeIfAbsent(entry.category(), ignored -> new ArrayList<>()).add(entry);
+            }
+            List<Integer> categories = new ArrayList<>(buckets.keySet());
+            categories.sort(Integer::compareTo);
+            List<ToolListPayload.Entry> sorted = new ArrayList<>(payload.entries().size());
+            for (Integer category : categories) {
+                sorted.addAll(buckets.get(category));
+            }
+            cachedEntries = List.copyOf(sorted);
+            Map<Integer, ToolListPayload.Entry> indexed = new HashMap<>();
+            for (ToolListPayload.Entry entry : cachedEntries) {
+                indexed.put(entry.index(), entry);
+            }
+            entriesByIndex = Map.copyOf(indexed);
+        }
+
+        private static EntryKey keyOf(ToolListPayload.Entry entry) {
+            return new EntryKey(entry.location(), entry.slot());
+        }
+
+        private static int findMatchingEntry(
+                List<ToolListPayload.Entry> entries, EntryKey key) {
+            if (key == null) {
+                return -1;
+            }
+            for (ToolListPayload.Entry entry : entries) {
+                if (entry.location().equals(key.location()) && entry.slot() == key.slot()) {
+                    return entry.index();
+                }
+            }
+            return -1;
         }
 
         private void renderOverlay(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
@@ -678,11 +776,18 @@ public final class PatternTerminalEvents {
                     x, y + 10, secondLineColor, false);
         }
 
-        private static ItemStack iconFor(String itemId) {
+        private ItemStack iconFor(String itemId) {
+            ItemStack cached = iconCache.get(itemId);
+            if (cached != null) {
+                return cached;
+            }
             try {
                 var item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
-                return item == null ? ItemStack.EMPTY : new ItemStack(item);
+                ItemStack icon = item == null ? ItemStack.EMPTY : new ItemStack(item);
+                iconCache.put(itemId, icon);
+                return icon;
             } catch (Exception ignored) {
+                iconCache.put(itemId, ItemStack.EMPTY);
                 return ItemStack.EMPTY;
             }
         }

@@ -60,6 +60,7 @@ public final class PatternActions {
      * Pattern selected in a normal AE2 encoding terminal for write-back.
      */
     private static final Map<UUID, TerminalEdit> TERMINAL_EDITS = new HashMap<>();
+    private static final Map<UUID, Object> TERMINAL_HOSTS = new HashMap<>();
     private static final Method AE2_ENCODE_PATTERN = findAe2EncodePattern();
 
     public record PendingEdit(ToolEntry entry, ItemStack pattern) {
@@ -87,6 +88,32 @@ public final class PatternActions {
         return (ItemStack) AE2_ENCODE_PATTERN.invoke(menu);
     }
 
+    /**
+     * Clears the temporary terminal state used by the checker without
+     * consuming the player's blank pattern. AE2's public clear() method only
+     * clears the fake input/output grids; its encoded-pattern slot is a
+     * separate inventory and must be cleared explicitly.
+     */
+    private static void clearTerminalState(PatternEncodingTermMenu menu) {
+        menu.clear();
+        if (menu.getHost() instanceof IPatternTerminalMenuHost terminalHost) {
+            terminalHost.getLogic().getEncodedPatternInv().setItemDirect(0, ItemStack.EMPTY);
+        }
+        menu.broadcastChanges();
+    }
+
+    private static void returnTerminalPattern(ServerPlayer player, InternalInventory encodedPatternInv) {
+        ItemStack existing = encodedPatternInv.getStackInSlot(0);
+        if (existing.isEmpty()) {
+            return;
+        }
+        ItemStack returned = existing.copy();
+        encodedPatternInv.setItemDirect(0, ItemStack.EMPTY);
+        if (!player.getInventory().add(returned)) {
+            player.drop(returned, false);
+        }
+    }
+
     private PatternActions() {
     }
 
@@ -95,7 +122,14 @@ public final class PatternActions {
     }
 
     public static void beginTerminalSession(ServerPlayer player) {
-        TERMINAL_EDITS.remove(player.getUUID());
+        UUID playerId = player.getUUID();
+        Object currentHost = player.containerMenu instanceof PatternEncodingTermMenu menu
+                ? menu.getHost()
+                : null;
+        Object previousHost = TERMINAL_HOSTS.put(playerId, currentHost);
+        if (previousHost != null && previousHost != currentHost) {
+            TERMINAL_EDITS.remove(playerId);
+        }
     }
 
     /**
@@ -133,16 +167,14 @@ public final class PatternActions {
         if (player.containerMenu instanceof PatternEncodingTermMenu menu
                 && menu.getHost() instanceof IPatternTerminalMenuHost terminalHost) {
             InternalInventory encodedPatternInv = terminalHost.getLogic().getEncodedPatternInv();
-            if (!encodedPatternInv.getStackInSlot(0).isEmpty()) {
-                HighlightManager.setNotice(player.getUUID(),
-                        Component.translatable("patternchecker.encode.clearEncodedSlot"));
-                sendToolList(player);
-                return;
-            }
+            // Selecting an entry is an explicit replacement request. Return
+            // any encoded pattern currently occupying AE2's output slot to the
+            // player first, so a stale/generated pattern can never block the
+            // list selection or be silently overwritten.
+            returnTerminalPattern(player, encodedPatternInv);
 
-            // Let AE2 decode the selected pattern and populate its fake input/output
-            // grid, but never leave the copied pattern in the real, extractable
-            // encoded-pattern slot. An empty stack does not clear the decoded grid.
+            // Clear the previous fake grid before loading the next selection.
+            menu.clear();
             try {
                 encodedPatternInv.setItemDirect(0, stack.copy());
             } finally {
@@ -184,12 +216,12 @@ public final class PatternActions {
             }
             if (!uploadEncodedPattern(player, entry, encoded, edit.originalPattern(), false)) {
                 TERMINAL_EDITS.remove(player.getUUID());
-                menu.clear();
+                clearTerminalState(menu);
                 sendToolList(player);
                 return;
             }
             TERMINAL_EDITS.remove(player.getUUID());
-            menu.clear();
+            clearTerminalState(menu);
             if (PatternCheckCommand.scanTargeted(player, true)) {
                 // scanTargeted already sent the refreshed list with the write
                 // success notice. Discard its deferred generic scan notice.
@@ -216,7 +248,8 @@ public final class PatternActions {
                     entry.itemId(),
                     entry.outputDesc(),
                     entry.inputDesc(),
-                    entry.category()));
+                    entry.category(),
+                    entry.slot()));
         }
         ItemStack tool = BoundNetwork.findTool(player);
         boolean bound = BoundNetwork.isBound(tool);

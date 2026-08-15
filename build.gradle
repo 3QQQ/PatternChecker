@@ -38,7 +38,8 @@ repositories {
 }
 
 base {
-    archivesName = mod_id
+    // Include the target Minecraft version in distributable filenames.
+    archivesName = "${mod_id}-mc${minecraft_version}"
 }
 
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.

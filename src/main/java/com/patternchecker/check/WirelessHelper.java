@@ -31,6 +31,9 @@ public final class WirelessHelper {
     private WirelessHelper() {
     }
 
+    public record WirelessTarget(ServerLevel level, BlockPos pos) {
+    }
+
     public static boolean isWirelessProvider(Object owner) {
         return owner != null && implementsInterface(owner.getClass(), WIRELESS_PROVIDER_HOST, new HashSet<>());
     }
@@ -80,9 +83,25 @@ public final class WirelessHelper {
     /** Returns the remote receiver/transmitter positions of a wireless container in this dimension. */
     public static List<BlockPos> resolveConnectionTargets(ServerLevel level, Object owner) {
         List<BlockPos> targets = new ArrayList<>();
+        for (WirelessTarget target : resolveConnectionLocations(level, owner)) {
+            if (target.level() == level) {
+                targets.add(target.pos());
+            }
+        }
+        return targets;
+    }
+
+    /**
+     * Returns configured wireless target locations, including targets in
+     * another dimension. Callers decide how to handle unloaded chunks.
+     */
+    @SuppressWarnings("unchecked")
+    public static List<WirelessTarget> resolveConnectionLocations(ServerLevel level, Object owner) {
+        List<WirelessTarget> targets = new ArrayList<>();
         if (!isWirelessProvider(owner)) {
             return targets;
         }
+        MinecraftServer server = level.getServer();
         try {
             Object list = owner.getClass().getMethod("getConnections").invoke(owner);
             if (list instanceof List<?> connections) {
@@ -90,9 +109,11 @@ public final class WirelessHelper {
                     try {
                         Object dim = ref.getClass().getMethod("dimension").invoke(ref);
                         Object pos = ref.getClass().getMethod("pos").invoke(ref);
-                        if (dim instanceof ResourceKey<?> key && key.equals(level.dimension())
-                                && pos instanceof BlockPos blockPos) {
-                            targets.add(blockPos);
+                        if (dim instanceof ResourceKey<?> key && pos instanceof BlockPos blockPos) {
+                            ServerLevel targetLevel = server.getLevel((ResourceKey<Level>) key);
+                            if (targetLevel != null) {
+                                targets.add(new WirelessTarget(targetLevel, blockPos));
+                            }
                         }
                     } catch (ReflectiveOperationException ignored) {
                     }

@@ -21,7 +21,7 @@ public record ToolListPayload(List<Entry> entries, boolean available, boolean in
         implements CustomPacketPayload {
 
     public record Entry(int index, String name, String location, String summary, boolean hasProvider, boolean error,
-                        String itemId, Component output, Component input, int category) {
+                        String itemId, Component output, Component input, int category, int slot) {
     }
 
     public static final Type<ToolListPayload> TYPE =
@@ -40,7 +40,8 @@ public record ToolListPayload(List<Entry> entries, boolean available, boolean in
             Component output = ComponentSerialization.STREAM_CODEC.decode(buffer);
             Component input = ComponentSerialization.STREAM_CODEC.decode(buffer);
             int category = ByteBufCodecs.INT.decode(buffer);
-            return new Entry(index, name, location, summary, hasProvider, error, itemId, output, input, category);
+            int slot = ByteBufCodecs.INT.decode(buffer);
+            return new Entry(index, name, location, summary, hasProvider, error, itemId, output, input, category, slot);
         }
 
         @Override
@@ -55,6 +56,7 @@ public record ToolListPayload(List<Entry> entries, boolean available, boolean in
             ComponentSerialization.STREAM_CODEC.encode(buffer, entry.output());
             ComponentSerialization.STREAM_CODEC.encode(buffer, entry.input());
             ByteBufCodecs.INT.encode(buffer, entry.category());
+            ByteBufCodecs.INT.encode(buffer, entry.slot());
         }
     };
 
