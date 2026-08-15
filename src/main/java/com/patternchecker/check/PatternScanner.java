@@ -2746,6 +2746,8 @@ public final class PatternScanner {
                             "industrialforegoing:crusher", "minecraft:smelting");
             case "industrialforegoing:resourceful_furnace" ->
                     List.of("minecraft:smelting");
+            case "powah:energizing_orb" ->
+                    List.of("powah:energizing");
             case "justdynathings:paradox_mixer" ->
                     List.of("justdynathings:paradox_mixer");
             case "justdynathings:reforger" ->
