@@ -1,6 +1,6 @@
 package com.patternchecker.client.screen;
 
-import appeng.client.gui.widgets.AE2Button;
+import com.patternchecker.client.widget.PatternButton;
 import com.patternchecker.client.PatternCheckClient;
 import com.patternchecker.menu.PatternCheckMenu;
 import com.patternchecker.network.NetworkHandler;
@@ -59,13 +59,13 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
     private static final int ACTION_BUTTONS = 3;
     private static final int TOOLTIP_WIDTH = 240;
 
-    private AE2Button scanButton;
-    private AE2Button inputButton;
-    private AE2Button duplicateButton;
-    private AE2Button unbindButton;
-    private AE2Button highlightButton;
-    private AE2Button extractButton;
-    private AE2Button uploadButton;
+    private PatternButton scanButton;
+    private PatternButton inputButton;
+    private PatternButton duplicateButton;
+    private PatternButton unbindButton;
+    private PatternButton highlightButton;
+    private PatternButton extractButton;
+    private PatternButton uploadButton;
 
     private int scroll;
     private int selected = -1;
@@ -83,21 +83,21 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         int top = this.topPos;
         int splitWidth = (this.imageWidth - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
 
-        scanButton = addRenderableWidget(new AE2Button(
+        scanButton = addRenderableWidget(new PatternButton(
                 left + OUTER_PADDING, top + TOP_BUTTON_Y, splitWidth, BUTTON_HEIGHT,
                 Component.translatable("patternchecker.menu.scan"),
                 button -> sendButton(PatternCheckMenu.BUTTON_SCAN)));
-        unbindButton = addRenderableWidget(new AE2Button(
+        unbindButton = addRenderableWidget(new PatternButton(
                 left + OUTER_PADDING + splitWidth + BUTTON_GAP, top + TOP_BUTTON_Y,
                 this.imageWidth - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                 Component.translatable("patternchecker.menu.unbind"),
                 button -> sendButton(PatternCheckMenu.BUTTON_UNBIND)));
-        inputButton = addRenderableWidget(new AE2Button(
+        inputButton = addRenderableWidget(new PatternButton(
                 left + OUTER_PADDING, top + TOGGLE_BUTTON_Y,
                 splitWidth, BUTTON_HEIGHT,
                 Component.empty(),
                 button -> sendButton(PatternCheckMenu.BUTTON_TOGGLE_INPUT)));
-        duplicateButton = addRenderableWidget(new AE2Button(
+        duplicateButton = addRenderableWidget(new PatternButton(
                 left + OUTER_PADDING + splitWidth + BUTTON_GAP, top + TOGGLE_BUTTON_Y,
                 this.imageWidth - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                 Component.empty(),
@@ -115,12 +115,12 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
                 "patternchecker.menu.upload", PatternCheckMenu.BUTTON_UPLOAD);
     }
 
-    private AE2Button actionButton(int index, int y, int baseWidth, int remainder,
+    private PatternButton actionButton(int index, int y, int baseWidth, int remainder,
                                    String labelKey, int action) {
         int widthBefore = index * baseWidth + Math.min(index, remainder);
         int buttonWidth = baseWidth + (index < remainder ? 1 : 0);
         int x = this.leftPos + OUTER_PADDING + index * BUTTON_GAP + widthBefore;
-        return addRenderableWidget(new AE2Button(
+        return addRenderableWidget(new PatternButton(
                 x, y, buttonWidth, BUTTON_HEIGHT, Component.translatable(labelKey),
                 button -> {
                     ToolListPayload.Entry entry = selectedEntry();
@@ -171,12 +171,12 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollAmount) {
         if (!isInsidePanel(mouseX, mouseY)) {
-            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+            return super.mouseScrolled(mouseX, mouseY, scrollAmount);
         }
         int maxScroll = Math.max(0, entries().size() - visibleRows());
-        int direction = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
+        int direction = scrollAmount > 0 ? -1 : scrollAmount < 0 ? 1 : 0;
         scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
         return true;
     }
@@ -235,7 +235,6 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
 
     @Override
     protected void renderBg(GuiGraphics gui, float partialTick, int mouseX, int mouseY) {
-        renderTransparentBackground(gui);
         drawAePanel(gui, this.leftPos, this.topPos, this.imageWidth, this.imageHeight);
     }
 

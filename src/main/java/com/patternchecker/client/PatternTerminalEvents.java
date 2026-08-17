@@ -1,7 +1,7 @@
 package com.patternchecker.client;
 
 import appeng.client.gui.me.items.PatternEncodingTermScreen;
-import appeng.client.gui.widgets.AE2Button;
+import com.patternchecker.client.widget.PatternButton;
 import com.patternchecker.PatternCheckerMod;
 import com.patternchecker.network.NetworkHandler;
 import com.patternchecker.network.PatternToolActionPayload;
@@ -17,11 +17,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ScreenEvent;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
+import net.minecraftforge.client.event.ScreenEvent;
+import com.patternchecker.network.NetworkHandler;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -137,8 +137,8 @@ public final class PatternTerminalEvents {
     public static void onMouseScrolled(ScreenEvent.MouseScrolled.Pre event) {
         if (event.getScreen() == activeScreen && activePanel != null
                 && activePanel.mouseScrolled(
-                        event.getMouseX(), event.getMouseY(),
-                        event.getScrollDeltaX(), event.getScrollDeltaY())) {
+                         event.getMouseX(), event.getMouseY(),
+                         event.getScrollDelta())) {
             event.setCanceled(true);
         }
     }
@@ -185,15 +185,15 @@ public final class PatternTerminalEvents {
         private static final int TOOLTIP_WIDTH = 240;
         private static final float OVERLAY_Z = 500.0F;
 
-        private final AE2Button scanButton;
-        private final AE2Button unbindButton;
-        private final AE2Button inputButton;
-        private final AE2Button duplicateButton;
-        private final AE2Button highlightButton;
-        private final AE2Button extractButton;
-        private final AE2Button uploadButton;
-        private final AE2Button writeButton;
-        private final AE2Button[] buttons;
+        private final PatternButton scanButton;
+        private final PatternButton unbindButton;
+        private final PatternButton inputButton;
+        private final PatternButton duplicateButton;
+        private final PatternButton highlightButton;
+        private final PatternButton extractButton;
+        private final PatternButton uploadButton;
+        private final PatternButton writeButton;
+        private final PatternButton[] buttons;
 
         private int scroll;
         private int selected = -1;
@@ -220,20 +220,20 @@ public final class PatternTerminalEvents {
             clampToScreen();
 
             int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
-            scanButton = new AE2Button(
+            scanButton = new PatternButton(
                     x + OUTER_PADDING, y + TOP_BUTTON_Y, splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.scan"),
                     button -> sendAction(PatternToolActionPayload.ACTION_SCAN, -1));
-            unbindButton = new AE2Button(
+            unbindButton = new PatternButton(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOP_BUTTON_Y,
                     width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.unbind"),
                     button -> sendAction(PatternToolActionPayload.ACTION_UNBIND, -1));
-            inputButton = new AE2Button(
+            inputButton = new PatternButton(
                     x + OUTER_PADDING, y + TOGGLE_BUTTON_Y, splitWidth, BUTTON_HEIGHT,
                     Component.empty(),
                     button -> sendAction(PatternToolActionPayload.ACTION_TOGGLE_INPUT, -1));
-            duplicateButton = new AE2Button(
+            duplicateButton = new PatternButton(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOGGLE_BUTTON_Y,
                     width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.empty(),
@@ -251,19 +251,19 @@ public final class PatternTerminalEvents {
                     "patternchecker.menu.upload", PatternToolActionPayload.ACTION_UPLOAD);
             writeButton = actionButton(3, actionY, actionWidth, remainder,
                     "patternchecker.menu.write", PatternToolActionPayload.ACTION_WRITE);
-            buttons = new AE2Button[]{
+            buttons = new PatternButton[]{
                     scanButton, unbindButton, inputButton, duplicateButton,
                     highlightButton, extractButton, uploadButton, writeButton
             };
             moveButtons();
         }
 
-        private AE2Button actionButton(int index, int y, int baseWidth, int remainder,
+        private PatternButton actionButton(int index, int y, int baseWidth, int remainder,
                                        String labelKey, int action) {
             int widthBefore = index * baseWidth + Math.min(index, remainder);
             int buttonWidth = baseWidth + (index < remainder ? 1 : 0);
             int x = getX() + OUTER_PADDING + index * BUTTON_GAP + widthBefore;
-            return new AE2Button(
+            return new PatternButton(
                     x, y, buttonWidth, BUTTON_HEIGHT, Component.translatable(labelKey),
                     button -> {
                         if (hasSelectedProvider()) {
@@ -277,7 +277,7 @@ public final class PatternTerminalEvents {
         }
 
         private static void sendAction(int action, int index) {
-            PacketDistributor.sendToServer(new PatternToolActionPayload(action, index));
+            NetworkHandler.sendToServer(new PatternToolActionPayload(action, index));
         }
 
         private List<ToolListPayload.Entry> entries() {
@@ -322,7 +322,7 @@ public final class PatternTerminalEvents {
             if (beginDragging(mouseX, mouseY, button)) {
                 return true;
             }
-            for (AE2Button panelButton : buttons) {
+            for (PatternButton panelButton : buttons) {
                 if (panelButton.mouseClicked(mouseX, mouseY, button)) {
                     return true;
                 }
@@ -368,7 +368,7 @@ public final class PatternTerminalEvents {
             if (capturedButton != button) {
                 return false;
             }
-            for (AE2Button panelButton : buttons) {
+            for (PatternButton panelButton : buttons) {
                 panelButton.mouseReleased(mouseX, mouseY, button);
             }
             capturedButton = -1;
@@ -412,12 +412,12 @@ public final class PatternTerminalEvents {
         }
 
         @Override
-        public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        public boolean mouseScrolled(double mouseX, double mouseY, double scrollAmount) {
             if (!PatternCheckClient.getToolList().available() || !isInside(mouseX, mouseY)) {
                 return false;
             }
             int maxScroll = Math.max(0, entries().size() - visibleRows());
-            int direction = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
+            int direction = scrollAmount > 0 ? -1 : scrollAmount < 0 ? 1 : 0;
             scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
             return true;
         }
@@ -514,7 +514,7 @@ public final class PatternTerminalEvents {
             gui.pose().pushPose();
             gui.pose().translate(0.0F, 0.0F, OVERLAY_Z);
             renderWidget(gui, mouseX, mouseY, partialTick);
-            for (AE2Button panelButton : buttons) {
+            for (PatternButton panelButton : buttons) {
                 panelButton.render(gui, mouseX, mouseY, partialTick);
             }
             renderSelectedIssueTooltip(gui, mouseX, mouseY);
@@ -556,7 +556,7 @@ public final class PatternTerminalEvents {
             int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
-            AE2Button[] actions = {highlightButton, extractButton, uploadButton, writeButton};
+            PatternButton[] actions = {highlightButton, extractButton, uploadButton, writeButton};
             for (int i = 0; i < actions.length; i++) {
                 int widthBefore = i * baseWidth + Math.min(i, remainder);
                 actions[i].setX(x + OUTER_PADDING + i * BUTTON_GAP + widthBefore);

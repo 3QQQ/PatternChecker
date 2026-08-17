@@ -3,7 +3,6 @@ package com.patternchecker.check;
 import appeng.api.networking.GridHelper;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
-import com.patternchecker.PatternCheckerMod;
 import com.patternchecker.item.PatternCheckerPresence;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -41,22 +40,31 @@ public final class BoundNetwork {
         tag.putInt(TAG_X, pos.getX());
         tag.putInt(TAG_Y, pos.getY());
         tag.putInt(TAG_Z, pos.getZ());
-        tool.set(PatternCheckerMod.BOUND_NETWORK.get(), tag);
+        CompoundTag target = tool.getOrCreateTag();
+        target.putString(TAG_DIM, tag.getString(TAG_DIM));
+        target.putInt(TAG_X, tag.getInt(TAG_X));
+        target.putInt(TAG_Y, tag.getInt(TAG_Y));
+        target.putInt(TAG_Z, tag.getInt(TAG_Z));
     }
 
     public static void clear(ItemStack tool) {
-        tool.remove(PatternCheckerMod.BOUND_NETWORK.get());
+        if (tool.hasTag()) {
+            tool.getTag().remove(TAG_DIM);
+            tool.getTag().remove(TAG_X);
+            tool.getTag().remove(TAG_Y);
+            tool.getTag().remove(TAG_Z);
+        }
     }
 
     public static boolean isBound(ItemStack tool) {
-        return tool.has(PatternCheckerMod.BOUND_NETWORK.get());
+        return tool.hasTag() && tool.getTag().contains(TAG_DIM);
     }
 
     public static String describe(ItemStack tool) {
         if (!isBound(tool)) {
             return "";
         }
-        CompoundTag tag = tool.get(PatternCheckerMod.BOUND_NETWORK.get());
+        CompoundTag tag = tool.getTag();
         int x = tag.getInt(TAG_X);
         int y = tag.getInt(TAG_Y);
         int z = tag.getInt(TAG_Z);
@@ -71,7 +79,7 @@ public final class BoundNetwork {
         if (tool.isEmpty() || !isBound(tool)) {
             return null;
         }
-        CompoundTag tag = tool.get(PatternCheckerMod.BOUND_NETWORK.get());
+        CompoundTag tag = tool.getTag();
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION,
                 ResourceLocation.parse(tag.getString(TAG_DIM)));
         BlockPos pos = new BlockPos(tag.getInt(TAG_X), tag.getInt(TAG_Y), tag.getInt(TAG_Z));

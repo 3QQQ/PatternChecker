@@ -133,7 +133,7 @@ public final class PatternCheckerPresence {
         if (value == null) {
             return null;
         }
-        if (value.getClass().getName().equals("net.neoforged.neoforge.common.util.LazyOptional")) {
+        if (value.getClass().getName().equals("net.minecraftforge.common.util.LazyOptional")) {
             Object resolved = value.getClass().getMethod("resolve").invoke(value);
             return resolved instanceof Optional<?> optional ? optional.orElse(null) : resolved;
         }

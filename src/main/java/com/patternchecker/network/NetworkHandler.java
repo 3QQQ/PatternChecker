@@ -6,21 +6,29 @@ import com.patternchecker.check.BoundNetwork;
 import com.patternchecker.command.PatternCheckCommand;
 import com.patternchecker.highlight.HighlightManager;
 import com.patternchecker.menu.PatternEditMenu;
-import net.minecraft.network.chat.Component;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
 
-/**
- * Common-side payload handler. The received list is parked in a shared buffer
- * that the client screen polls on its tick, so no client classes are touched
- * on the server side.
- */
+import java.util.function.Supplier;
+
 public final class NetworkHandler {
+    private static final String PROTOCOL = "1";
+    private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
+            new ResourceLocation(PatternCheckerMod.MODID, "main"),
+            () -> PROTOCOL,
+            PROTOCOL::equals,
+            PROTOCOL::equals);
 
+    private static int packetId;
     private static volatile ToolListPayload pending;
     private static volatile HighlightPayload pendingHighlights;
     private static volatile PatternEditPayload pendingEdit;
@@ -28,13 +36,34 @@ public final class NetworkHandler {
     private NetworkHandler() {
     }
 
-    public static void handleToolList(ToolListPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> pending = payload);
+    public static void register() {
+        CHANNEL.registerMessage(packetId++, ToolListPayload.class,
+                ToolListPayload::encode, ToolListPayload::decode, NetworkHandler::handleToolList);
+        CHANNEL.registerMessage(packetId++, HighlightPayload.class,
+                HighlightPayload::encode, HighlightPayload::decode, NetworkHandler::handleHighlights);
+        CHANNEL.registerMessage(packetId++, PatternEditPayload.class,
+                PatternEditPayload::encode, PatternEditPayload::decode, NetworkHandler::handleEdit);
+        CHANNEL.registerMessage(packetId++, PatternEncodePayload.class,
+                PatternEncodePayload::encode, PatternEncodePayload::decode, NetworkHandler::handleEncode);
+        CHANNEL.registerMessage(packetId++, PatternSlotPayload.class,
+                PatternSlotPayload::encode, PatternSlotPayload::decode, NetworkHandler::handleSlot);
+        CHANNEL.registerMessage(packetId++, PatternToolActionPayload.class,
+                PatternToolActionPayload::encode, PatternToolActionPayload::decode,
+                NetworkHandler::handleToolAction);
     }
 
-    /**
-     * Returns the latest received list, if any, and clears the buffer.
-     */
+    public static void sendToPlayer(ServerPlayer player, Object payload) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), payload);
+    }
+
+    public static void sendToServer(Object payload) {
+        CHANNEL.sendToServer(payload);
+    }
+
+    public static void handleToolList(ToolListPayload payload, Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> pending = payload);
+    }
+
     public static ToolListPayload poll() {
         ToolListPayload payload = pending;
         pending = null;
@@ -45,11 +74,8 @@ public final class NetworkHandler {
         pending = null;
     }
 
-    public static void handleHighlights(HighlightPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            pendingHighlights = payload;
-            PatternCheckerMod.LOGGER.info("Client received highlight payload: {} entries", payload.highlights().size());
-        });
+    public static void handleHighlights(HighlightPayload payload, Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> pendingHighlights = payload);
     }
 
     public static HighlightPayload pollHighlights() {
@@ -58,8 +84,8 @@ public final class NetworkHandler {
         return payload;
     }
 
-    public static void handleEdit(PatternEditPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> pendingEdit = payload);
+    public static void handleEdit(PatternEditPayload payload, Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> pendingEdit = payload);
     }
 
     public static PatternEditPayload pollEdit() {
@@ -68,97 +94,105 @@ public final class NetworkHandler {
         return payload;
     }
 
-    public static void handleEncode(PatternEncodePayload payload, IPayloadContext context) {
-        if (context.player() instanceof ServerPlayer player) {
-            context.enqueueWork(() -> PatternActions.encodeAndUpload(player, payload));
-        }
+    public static void handleEncode(PatternEncodePayload payload, Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> {
+            ServerPlayer player = supplier.get().getSender();
+            if (player != null) {
+                PatternActions.encodeAndUpload(player, payload);
+            }
+        });
     }
 
-    public static void handleSlot(PatternSlotPayload payload, IPayloadContext context) {
-        if (context.player() instanceof ServerPlayer player) {
-            context.enqueueWork(() -> {
-                if (!(player.containerMenu instanceof PatternEditMenu menu)) {
+    public static void handleSlot(PatternSlotPayload payload, Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> {
+            ServerPlayer player = supplier.get().getSender();
+            if (player == null || !(player.containerMenu instanceof PatternEditMenu menu)) {
+                return;
+            }
+            if (payload.slotIndex() < 0 || payload.slotIndex() >= PatternEditMenu.GRID_SLOTS) {
+                return;
+            }
+            if (payload.count() <= 0 || payload.itemId().isEmpty()) {
+                menu.getGrid().setItem(payload.slotIndex(), ItemStack.EMPTY);
+                menu.broadcastChanges();
+                return;
+            }
+            try {
+                Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(payload.itemId()));
+                if (item == null) {
                     return;
                 }
-                if (payload.slotIndex() < 0 || payload.slotIndex() >= PatternEditMenu.GRID_SLOTS) {
-                    return;
-                }
-                if (payload.count() <= 0 || payload.itemId().isEmpty()) {
-                    menu.getGrid().setItem(payload.slotIndex(), ItemStack.EMPTY);
-                    menu.broadcastChanges();
-                    return;
-                }
-                try {
-                    Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(payload.itemId()));
-                    if (item == null) {
-                        return;
+                menu.getGrid().setItem(payload.slotIndex(),
+                        new ItemStack(item, Math.min(Math.max(1, payload.count()), 999)));
+                menu.broadcastChanges();
+            } catch (Exception e) {
+                PatternCheckerMod.LOGGER.warn("handleSlot failed", e);
+            }
+        });
+    }
+
+    public static void handleToolAction(PatternToolActionPayload payload,
+                                         Supplier<NetworkEvent.Context> supplier) {
+        enqueue(supplier, () -> {
+            ServerPlayer player = supplier.get().getSender();
+            if (player == null) {
+                return;
+            }
+            if (payload.action() == PatternToolActionPayload.ACTION_SYNC) {
+                PatternActions.beginTerminalSession(player);
+                PatternActions.sendToolList(player);
+                return;
+            }
+            if (BoundNetwork.findTool(player).isEmpty()) {
+                return;
+            }
+            switch (payload.action()) {
+                case PatternToolActionPayload.ACTION_SCAN ->
+                        PatternCheckCommand.scanTargeted(player, true);
+                case PatternToolActionPayload.ACTION_UNBIND -> {
+                    ItemStack tool = BoundNetwork.findTool(player);
+                    if (!tool.isEmpty()) {
+                        BoundNetwork.clear(tool);
                     }
-                    menu.getGrid().setItem(payload.slotIndex(),
-                            new ItemStack(item, Math.min(Math.max(1, payload.count()), 999)));
-                    menu.broadcastChanges();
-                } catch (Exception e) {
-                    com.patternchecker.PatternCheckerMod.LOGGER.warn("handleSlot failed", e);
-                }
-            });
-        }
-    }
-
-    public static void handleToolAction(PatternToolActionPayload payload, IPayloadContext context) {
-        if (context.player() instanceof ServerPlayer player) {
-            context.enqueueWork(() -> {
-                if (payload.action() == PatternToolActionPayload.ACTION_SYNC) {
-                    PatternActions.beginTerminalSession(player);
+                    HighlightManager.setNotice(player.getUUID(),
+                            Component.translatable("patternchecker.bound.unbound"));
                     PatternActions.sendToolList(player);
-                    return;
                 }
-                if (BoundNetwork.findTool(player).isEmpty()) {
-                    return;
+                case PatternToolActionPayload.ACTION_TOGGLE_INPUT -> {
+                    HighlightManager.toggleInputIssues(player);
+                    PatternCheckCommand.scanTargeted(player, true);
                 }
-                switch (payload.action()) {
-                    case PatternToolActionPayload.ACTION_SCAN -> {
-                        PatternCheckCommand.scanTargeted(player, true);
-                        return;
-                    }
-                    case PatternToolActionPayload.ACTION_UNBIND -> {
-                        ItemStack tool = BoundNetwork.findTool(player);
-                        if (!tool.isEmpty()) {
-                            BoundNetwork.clear(tool);
-                        }
-                        HighlightManager.setNotice(player.getUUID(),
-                                Component.translatable("patternchecker.bound.unbound"));
-                        PatternActions.sendToolList(player);
-                        return;
-                    }
-                    case PatternToolActionPayload.ACTION_TOGGLE_INPUT -> {
-                        HighlightManager.toggleInputIssues(player);
-                        PatternCheckCommand.scanTargeted(player, true);
-                        return;
-                    }
-                    case PatternToolActionPayload.ACTION_TOGGLE_DUPLICATE -> {
-                        HighlightManager.toggleDuplicateIssues(player);
-                        PatternCheckCommand.scanTargeted(player, true);
-                        return;
-                    }
-                    case PatternToolActionPayload.ACTION_WRITE -> {
+                case PatternToolActionPayload.ACTION_TOGGLE_DUPLICATE -> {
+                    HighlightManager.toggleDuplicateIssues(player);
+                    PatternCheckCommand.scanTargeted(player, true);
+                }
+                case PatternToolActionPayload.ACTION_WRITE ->
                         PatternActions.uploadCurrentTerminal(player);
+                default -> {
+                    var entry = HighlightManager.getToolEntry(player.getUUID(), payload.entryIndex());
+                    if (entry == null) {
                         return;
                     }
-                    default -> {
+                    switch (payload.action()) {
+                        case PatternToolActionPayload.ACTION_HIGHLIGHT ->
+                                PatternActions.highlight(player, entry);
+                        case PatternToolActionPayload.ACTION_EXTRACT ->
+                                PatternActions.extract(player, entry);
+                        case PatternToolActionPayload.ACTION_UPLOAD ->
+                                PatternActions.upload(player, entry);
+                        case PatternToolActionPayload.ACTION_SELECT ->
+                                PatternActions.loadEntry(player, entry);
+                        default -> {
+                        }
                     }
                 }
-                var entry = HighlightManager.getToolEntry(player.getUUID(), payload.entryIndex());
-                if (entry == null) {
-                    return;
-                }
-                switch (payload.action()) {
-                    case PatternToolActionPayload.ACTION_HIGHLIGHT -> PatternActions.highlight(player, entry);
-                    case PatternToolActionPayload.ACTION_EXTRACT -> PatternActions.extract(player, entry);
-                    case PatternToolActionPayload.ACTION_UPLOAD -> PatternActions.upload(player, entry);
-                    case PatternToolActionPayload.ACTION_SELECT -> PatternActions.loadEntry(player, entry);
-                    default -> {
-                    }
-                }
-            });
-        }
+            }
+        });
+    }
+
+    private static void enqueue(Supplier<NetworkEvent.Context> supplier, Runnable task) {
+        NetworkEvent.Context context = supplier.get();
+        context.enqueueWork(task);
+        context.setPacketHandled(true);
     }
 }

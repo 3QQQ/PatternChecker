@@ -7,10 +7,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent;
 import com.patternchecker.network.HighlightPayload;
 import com.patternchecker.network.HighlightPayload.HighlightData;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.patternchecker.network.NetworkHandler;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -166,10 +166,13 @@ public final class HighlightManager {
                     highlight.pos(), highlight.connections()));
         }
         PatternCheckerMod.LOGGER.info("sendHighlights: {} boxes to {}", data.size(), player.getGameProfile().getName());
-        PacketDistributor.sendToPlayer(player, new HighlightPayload(data));
+        NetworkHandler.sendToPlayer(player, new HighlightPayload(data));
     }
 
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
         if (ACTIVE_HIGHLIGHTS.isEmpty()) {
             return;
         }

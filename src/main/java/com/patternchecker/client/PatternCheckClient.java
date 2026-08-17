@@ -6,11 +6,12 @@ import com.patternchecker.client.screen.PatternCheckScreen;
 import com.patternchecker.client.screen.PatternEditScreen;
 import com.patternchecker.network.ToolListPayload;
 import com.patternchecker.network.HighlightPayload;
+import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 @SuppressWarnings("removal")
 @EventBusSubscriber(modid = PatternCheckerMod.MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
@@ -28,9 +29,11 @@ public final class PatternCheckClient {
     }
 
     @SubscribeEvent
-    public static void registerScreens(RegisterMenuScreensEvent event) {
-        event.register(PatternCheckerMod.PATTERN_CHECK_MENU.get(), PatternCheckScreen::new);
-        event.register(PatternCheckerMod.PATTERN_EDIT_MENU.get(), PatternEditScreen::new);
+    public static void registerScreens(FMLClientSetupEvent event) {
+        event.enqueueWork(() -> {
+            MenuScreens.register(PatternCheckerMod.PATTERN_CHECK_MENU.get(), PatternCheckScreen::new);
+            MenuScreens.register(PatternCheckerMod.PATTERN_EDIT_MENU.get(), PatternEditScreen::new);
+        });
     }
 
     public static void setToolList(ToolListPayload payload) {

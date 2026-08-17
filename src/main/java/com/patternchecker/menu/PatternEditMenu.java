@@ -189,7 +189,7 @@ public class PatternEditMenu extends AbstractContainerMenu {
     /** True when a blank pattern sits in the blank pattern slot. */
     public boolean hasBlankPattern() {
         ItemStack stack = grid.getItem(BLANK_SLOT);
-        return !stack.isEmpty() && AEItems.BLANK_PATTERN.is(stack);
+        return !stack.isEmpty() && AEItems.BLANK_PATTERN.isSameAs(stack);
     }
 
     @Override

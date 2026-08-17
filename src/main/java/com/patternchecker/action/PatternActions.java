@@ -25,7 +25,6 @@ import com.patternchecker.network.PatternEditPayload.Slot;
 import com.patternchecker.network.PatternEncodePayload;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -37,7 +36,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.SimpleMenuProvider;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.patternchecker.network.NetworkHandler;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -210,9 +209,8 @@ public final class PatternActions {
                 player.displayClientMessage(Component.translatable("patternchecker.encode.failed"), true);
                 return;
             }
-            Component customName = edit.originalPattern().get(DataComponents.CUSTOM_NAME);
-            if (customName != null) {
-                encoded.set(DataComponents.CUSTOM_NAME, customName);
+            if (edit.originalPattern().hasCustomHoverName()) {
+                encoded.setHoverName(edit.originalPattern().getHoverName());
             }
             if (!uploadEncodedPattern(player, entry, encoded, edit.originalPattern(), false)) {
                 TERMINAL_EDITS.remove(player.getUUID());
@@ -258,7 +256,7 @@ public final class PatternActions {
         if (notice == null) {
             notice = Component.empty();
         }
-        PacketDistributor.sendToPlayer(player,
+        NetworkHandler.sendToPlayer(player,
                 new ToolListPayload(entries, !tool.isEmpty(), HighlightManager.showInputIssues(player.getUUID()),
                         HighlightManager.showDuplicateIssues(player.getUUID()), bound, boundLabel, notice));
     }
@@ -477,7 +475,7 @@ public final class PatternActions {
         }
         if (!expectedOriginal.isEmpty()) {
             ItemStack current = inv.getStackInSlot(target);
-            if (current.isEmpty() || !ItemStack.isSameItemSameComponents(current, expectedOriginal)) {
+            if (current.isEmpty() || !ItemStack.isSameItemSameTags(current, expectedOriginal)) {
                 HighlightManager.setNotice(serverPlayer.getUUID(),
                         Component.translatable("patternchecker.encode.originalChanged"));
                 if (sendUpdate) {
@@ -547,7 +545,8 @@ public final class PatternActions {
 
         ItemStack encoded;
         try {
-            encoded = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
+            encoded = PatternDetailsHelper.encodeProcessingPattern(
+                    inputs.toArray(GenericStack[]::new), outputs.toArray(GenericStack[]::new));
         } catch (Exception e) {
             HighlightManager.setNotice(player.getUUID(),
                     Component.translatable("patternchecker.encode.failed"));
@@ -648,7 +647,8 @@ public final class PatternActions {
 
         ItemStack encoded;
         try {
-            encoded = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
+            encoded = PatternDetailsHelper.encodeProcessingPattern(
+                    inputs.toArray(GenericStack[]::new), outputs.toArray(GenericStack[]::new));
         } catch (Exception e) {
             HighlightManager.setNotice(player.getUUID(),
                     Component.translatable("patternchecker.encode.failed"));

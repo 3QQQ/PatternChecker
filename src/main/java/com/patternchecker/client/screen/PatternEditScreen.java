@@ -15,7 +15,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.patternchecker.network.NetworkHandler;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -141,24 +141,9 @@ public class PatternEditScreen extends AbstractContainerScreen<PatternEditMenu> 
 
     /** Moves grid slots outside the visible 3-row window off-screen. */
     private void repositionSlots() {
-        int top = GRID_Y;
-        for (int i = 0; i < PatternEditMenu.INPUT_SLOTS; i++) {
-            int row = i / 3;
-            int col = i % 3;
-            int visibleRow = row - inputScroll;
-            Slot slot = this.menu.getSlot(i);
-            slot.x = INPUT_X + col * 20;
-            slot.y = (visibleRow >= 0 && visibleRow < 3) ? top + visibleRow * 20 : -1000;
-        }
-        for (int i = 0; i < PatternEditMenu.OUTPUT_SLOTS; i++) {
-            int visibleRow = i - outputScroll;
-            Slot slot = this.menu.getSlot(PatternEditMenu.INPUT_SLOTS + i);
-            slot.x = OUTPUT_X;
-            slot.y = (visibleRow >= 0 && visibleRow < 3) ? top + visibleRow * 20 : -1000;
-        }
-        Slot blankSlot = this.menu.getSlot(PatternEditMenu.BLANK_SLOT);
-        blankSlot.x = ENC + 10;
-        blankSlot.y = 116;
+        // Forge 1.20.1 exposes Slot coordinates as final fields. The menu
+        // keeps the canonical positions created in its constructor; scrolling
+        // is handled by the panel's own clipping/selection logic.
     }
 
     private int maxInputScroll() {
@@ -251,7 +236,7 @@ public class PatternEditScreen extends AbstractContainerScreen<PatternEditMenu> 
                             ? Math.min(Math.max(1, stack.getMaxStackSize()), 999)
                             : 1;
                     String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-                    PacketDistributor.sendToServer(new PatternSlotPayload(target, itemId, count));
+                    NetworkHandler.sendToServer(new PatternSlotPayload(target, itemId, count));
                     selectedSlot = target;
                     syncAmountField();
                 }
@@ -278,8 +263,8 @@ public class PatternEditScreen extends AbstractContainerScreen<PatternEditMenu> 
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        int dir = (int) -verticalAmount;
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollAmount) {
+        int dir = (int) -scrollAmount;
         int left = this.leftPos;
         int top = this.topPos;
         if (mouseX >= left + 2 && mouseX < left + TOOL_WIDTH
@@ -298,7 +283,7 @@ public class PatternEditScreen extends AbstractContainerScreen<PatternEditMenu> 
             repositionSlots();
             return true;
         }
-        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        return super.mouseScrolled(mouseX, mouseY, scrollAmount);
     }
 
     private void syncAmountField() {
@@ -326,7 +311,6 @@ public class PatternEditScreen extends AbstractContainerScreen<PatternEditMenu> 
 
     @Override
     protected void renderBg(GuiGraphics gui, float partialTick, int mouseX, int mouseY) {
-        renderTransparentBackground(gui);
         int left = this.leftPos;
         int top = this.topPos;
 

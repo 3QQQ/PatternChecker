@@ -62,7 +62,7 @@ public class PatternCheckerToolItem extends Item {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+    public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
         tooltip.add(Component.translatable("item.patternchecker.pattern_checker_tool.tooltip"));
     }
 }

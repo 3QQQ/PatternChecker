@@ -29,7 +29,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.BlastFurnaceBlock;
@@ -158,7 +158,7 @@ public final class PatternScanner {
         private final Level level;
         private final Map<IGrid, GridState> gridStates = new IdentityHashMap<>();
         private final Map<Object, MachineState> machineStates = new IdentityHashMap<>();
-        private final Map<Item, List<RecipeHolder<?>>> standardRecipesByOutput = new HashMap<>();
+        private final Map<Item, List<Recipe<?>>> standardRecipesByOutput = new HashMap<>();
         private final Map<String, List<PreparedRecipe>> machineRecipesByOutput = new HashMap<>();
         private final Map<DuplicateSignature, Boolean> currentRecipeMatches = new HashMap<>();
         private final Map<RecipeMatchKey, Boolean> machineRecipeMatches = new HashMap<>();
@@ -179,16 +179,16 @@ public final class PatternScanner {
                     new HashMap<>()));
         }
 
-        private List<RecipeHolder<?>> standardRecipesFor(Item item) {
+        private List<Recipe<?>> standardRecipesFor(Item item) {
             if (!standardRecipeIndexBuilt) {
                 standardRecipeIndexBuilt = true;
                 var registryAccess = level.registryAccess();
-                for (RecipeHolder<?> holder : level.getRecipeManager().getOrderedRecipes()) {
-                    ItemStack result = holder.value().getResultItem(registryAccess);
+                for (Recipe<?> recipe : level.getRecipeManager().getRecipes()) {
+                    ItemStack result = recipe.getResultItem(registryAccess);
                     if (!result.isEmpty()) {
                         standardRecipesByOutput
                                 .computeIfAbsent(result.getItem(), ignored -> new ArrayList<>())
-                                .add(holder);
+                                .add(recipe);
                     }
                 }
             }
@@ -199,8 +199,7 @@ public final class PatternScanner {
             if (!machineRecipeIndexBuilt) {
                 machineRecipeIndexBuilt = true;
                 var registryAccess = level.registryAccess();
-                for (RecipeHolder<?> holder : level.getRecipeManager().getOrderedRecipes()) {
-                    Recipe<?> recipe = holder.value();
+                for (Recipe<?> recipe : level.getRecipeManager().getRecipes()) {
                     // Some machine mods implement CraftingRecipe for serializer
                     // convenience while registering a distinct machine recipe
                     // type (JDT goo spreading and JDTE infusion are examples).
@@ -384,7 +383,7 @@ public final class PatternScanner {
             IPatternDetails providerDetail = null;
             List<IPatternDetails> matchingDetails = providerDetails.get(AEItemKey.of(stack));
             if (matchingDetails != null && !matchingDetails.isEmpty()) {
-                providerDetail = matchingDetails.removeFirst();
+                providerDetail = matchingDetails.remove(0);
             }
             check(stack, providerDetail, checkGrid, level, location, pos, slot,
                     provider ? owner : null,
@@ -584,7 +583,7 @@ public final class PatternScanner {
             }
         }
 
-        if (details.getOutputs().isEmpty()) {
+        if (details.getOutputs().length == 0) {
             issues.add(new PatternIssue(PatternIssue.Type.ERROR, PatternIssue.Category.BROKEN,
                     message("patternchecker.issue.nooutput", patternName, location, null), pos, location));
         }
@@ -882,7 +881,7 @@ public final class PatternScanner {
     private static boolean hasMatchingMachineRecipe(Level level, IPatternDetails details, RecipeType<?> onlyType,
                                                     String machineId, ScanContext context) {
         List<PatternInputSlot> inputs = patternInputSlots(details);
-        if (inputs.isEmpty() || details.getOutputs().isEmpty()) {
+        if (inputs.isEmpty() || details.getOutputs().length == 0) {
             return false;
         }
 
@@ -895,7 +894,8 @@ public final class PatternScanner {
 
         Set<PreparedRecipe> candidates = Collections.newSetFromMap(new IdentityHashMap<>());
         for (GenericStack output : details.getOutputs()) {
-            if (output != null && output.what() instanceof AEKey outputKey) {
+            AEKey outputKey = output == null ? null : output.what();
+            if (outputKey != null) {
                 candidates.addAll(context.machineRecipesFor(outputKey.getId().toString()));
             }
         }
@@ -937,7 +937,8 @@ public final class PatternScanner {
                                                   boolean requireAllOutputs) {
         Map<String, Long> patternAmounts = new LinkedHashMap<>();
         for (GenericStack output : details.getOutputs()) {
-            if (output == null || !(output.what() instanceof AEKey key) || output.amount() <= 0) {
+            AEKey key = output == null ? null : output.what();
+            if (key == null || output.amount() <= 0) {
                 return Set.of();
             }
             patternAmounts.merge(key.getId().toString(), output.amount(), PatternScanner::saturatedAdd);
@@ -1210,7 +1211,7 @@ public final class PatternScanner {
      * addon's recipe object.
      */
     private static List<RecipeOutput> recipeOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         String namespace = recipeNamespace(recipe);
         return switch (namespace) {
             case "mekanism" -> recipeOutputsFromMembers(recipe, registryAccess,
@@ -1227,7 +1228,7 @@ public final class PatternScanner {
                     aliases("getResult", "result"), aliases("getOutput", "output"));
             case "advanced_ae" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getOutput", "output"));
-            case "extendedae" -> recipeOutputsFromMembers(recipe, registryAccess,
+            case "expatternprovider" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getOutput", "output"));
             case "ae2lt" -> ae2LtRecipeOutputs(recipe, registryAccess);
             case "data_energistics" -> recipeOutputsFromMembers(recipe, registryAccess,
@@ -1266,7 +1267,7 @@ public final class PatternScanner {
      * their layouts separate instead of sharing a broad addon-wide alias list.
      */
     private static List<RecipeOutput> ae2LtRecipeOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         return switch (recipeTypeId(recipe.getType())) {
             case "ae2lt:lightning_transform" ->
                     genericRecipeOutputs(recipe, registryAccess);
@@ -1289,7 +1290,7 @@ public final class PatternScanner {
     }
 
     private static List<RecipeOutput> ae2LtCrystalCatalyzerOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         List<RecipeOutput> outputs = genericRecipeOutputs(recipe, registryAccess);
         Object outputSpec = firstMember(recipe, "outputSpec");
         Object resolved = firstMember(outputSpec, "resolve");
@@ -1299,7 +1300,7 @@ public final class PatternScanner {
     }
 
     private static List<RecipeOutput> jdteAndJdtRecipeOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         List<RecipeOutput> outputs = recipeOutputsFromMembers(recipe, registryAccess,
                             aliases("getOutputs", "outputs"),
                             aliases("getOutput", "output"), aliases("getResult", "result"),
@@ -1324,14 +1325,14 @@ public final class PatternScanner {
     }
 
     private static List<RecipeOutput> genericRecipeOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         List<RecipeOutput> outputs = new ArrayList<>();
         addRecipeOutput(outputs, recipe.getResultItem(registryAccess));
         return outputs;
     }
 
     private static List<RecipeOutput> recipeOutputsFromMembers(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess,
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess,
             String[]... memberAliases) {
         List<RecipeOutput> outputs = genericRecipeOutputs(recipe, registryAccess);
         for (String[] aliases : memberAliases) {
@@ -1341,7 +1342,7 @@ public final class PatternScanner {
     }
 
     private static List<RecipeOutput> enderIoRecipeOutputs(
-            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
         List<RecipeOutput> outputs = recipeOutputsFromMembers(recipe, registryAccess,
                 aliases("getOutput", "output"), aliases("getResult", "result"));
         try {
@@ -1363,7 +1364,7 @@ public final class PatternScanner {
         if (value instanceof ItemStack stack && stack.isEmpty()) {
             return;
         }
-        if (value instanceof net.neoforged.neoforge.fluids.FluidStack stack
+        if (value instanceof net.minecraftforge.fluids.FluidStack stack
                 && stack.isEmpty()) {
             return;
         }
@@ -1513,7 +1514,8 @@ public final class PatternScanner {
         for (IPatternDetails.IInput input : details.getInputs()) {
             List<PatternInputCandidate> candidates = new ArrayList<>();
             for (GenericStack candidate : input.getPossibleInputs()) {
-                if (candidate != null && candidate.what() instanceof AEKey key) {
+                AEKey key = candidate == null ? null : candidate.what();
+                if (key != null) {
                     ItemStack itemStack = key instanceof AEItemKey itemKey ? itemKey.toStack() : null;
                     candidates.add(new PatternInputCandidate(key.getId().toString(), itemStack,
                             Math.max(1, candidate.amount() * input.getMultiplier())));
@@ -1724,7 +1726,7 @@ public final class PatternScanner {
         if (value instanceof ItemStack stack && stack.isEmpty()) {
             return;
         }
-        if (value instanceof net.neoforged.neoforge.fluids.FluidStack stack
+        if (value instanceof net.minecraftforge.fluids.FluidStack stack
                 && stack.isEmpty()) {
             return;
         }
@@ -1768,7 +1770,7 @@ public final class PatternScanner {
         if (input instanceof ItemStack stack && stack.isEmpty()) {
             return null;
         }
-        if (input instanceof net.neoforged.neoforge.fluids.FluidStack stack
+        if (input instanceof net.minecraftforge.fluids.FluidStack stack
                 && stack.isEmpty()) {
             return null;
         }
@@ -1872,7 +1874,7 @@ public final class PatternScanner {
         if (value == null || !visited.add(value)) {
             return null;
         }
-        if (value instanceof net.neoforged.neoforge.fluids.FluidStack stack
+        if (value instanceof net.minecraftforge.fluids.FluidStack stack
                 && stack.isEmpty()) {
             return null;
         }
@@ -1946,16 +1948,16 @@ public final class PatternScanner {
         if (inputStacks.isEmpty()) {
             return true;
         }
-        Set<RecipeHolder<?>> candidates = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Recipe<?>> candidates = Collections.newSetFromMap(new IdentityHashMap<>());
         for (GenericStack output : details.getOutputs()) {
             if (output != null && output.what() instanceof AEItemKey outputKey) {
                 candidates.addAll(context.standardRecipesFor(outputKey.getItem()));
             }
         }
         var registryAccess = level.registryAccess();
-        for (RecipeHolder<?> holder : candidates) {
+        for (Recipe<?> recipe : candidates) {
             boolean inputsMatch = true;
-            for (Ingredient ingredient : holder.value().getIngredients()) {
+            for (Ingredient ingredient : recipe.getIngredients()) {
                 // Skip empty cells of shaped recipes - they must not be matched.
                 if (ingredient == null || ingredient.isEmpty()) {
                     continue;
@@ -1975,7 +1977,7 @@ public final class PatternScanner {
             if (!inputsMatch) {
                 continue;
             }
-            ItemStack result = holder.value().getResultItem(registryAccess);
+            ItemStack result = recipe.getResultItem(registryAccess);
             for (GenericStack output : details.getOutputs()) {
                 if (output != null && output.what() instanceof AEItemKey outputKey
                     && result.getItem() == outputKey.getItem()) {
@@ -2318,7 +2320,8 @@ public final class PatternScanner {
                 knownNonProcessingTarget |= isAe2LtNonProcessingTarget(block);
                 unknownAddonTarget |= isUnknownAddonMachine(block);
                 addMmrMachineId(level, target, machineIds);
-                ICraftingMachine machine = ICraftingMachine.of(level, pos, direction);
+                var blockEntity = level.getBlockEntity(pos);
+                ICraftingMachine machine = blockEntity == null ? null : ICraftingMachine.of(blockEntity, direction);
                 if (machine != null && machine.acceptsPlans()) {
                     acceptsPlans = true;
                 }
@@ -2353,7 +2356,8 @@ public final class PatternScanner {
                     knownNonProcessingTarget |= isAe2LtNonProcessingTarget(adjacent);
                     unknownAddonTarget |= isUnknownAddonMachine(adjacent);
                     addMmrMachineId(level, adjacentPos, machineIds);
-                    ICraftingMachine machine = ICraftingMachine.of(level, target, direction);
+                    var blockEntity = level.getBlockEntity(target);
+                    ICraftingMachine machine = blockEntity == null ? null : ICraftingMachine.of(blockEntity, direction);
                     if (machine != null && machine.acceptsPlans()) {
                         acceptsPlans = true;
                     }
@@ -2436,10 +2440,11 @@ public final class PatternScanner {
     private static boolean isCraftingOnlyBlock(Block block) {
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
         return id.toString().equals("ae2:molecular_assembler")
-                || id.toString().equals("extendedae:ex_molecular_assembler")
-                || id.toString().equals("extendedae:assembler_matrix_crafter")
+                || id.toString().equals("expatternprovider:ex_molecular_assembler")
+                || id.toString().equals("expatternprovider:assembler_matrix_crafter")
                 || id.toString().equals("advanced_ae:quantum_crafter")
                 || id.toString().equals("extendedae_plus:assembler_matrix_crafter_plus")
+                || id.toString().equals("appflux:flux_accessor")
                 || id.toString().equals("ae2lt:pigmee_molecular_assembler");
     }
 
@@ -2689,18 +2694,14 @@ public final class PatternScanner {
             return List.of(MMR_RECIPE_TYPE);
         }
         return switch (id) {
-            case "ae2:charger", "extendedae:ex_charger" ->
+            case "ae2:charger", "expatternprovider:ex_charger" ->
                     List.of("ae2:charger");
-            case "ae2:inscriber", "extendedae:ex_inscriber" ->
+            case "ae2:inscriber", "expatternprovider:ex_inscriber" ->
                     List.of("ae2:inscriber");
             case "advanced_ae:reaction_chamber" ->
                     List.of("advanced_ae:reaction");
-            case "extendedae:circuit_cutter" ->
-                    List.of("extendedae:circuit_cutter");
-            case "extendedae:crystal_assembler" ->
-                    List.of("extendedae:crystal_assembler");
-            case "extendedae:crystal_fixer" ->
-                    List.of("extendedae:crystal_fixer");
+            case "expatternprovider:circuit_cutter" ->
+                    List.of("expatternprovider:circuit_cutter");
             case "data_energistics:data_charger", "data_energistics:extended_data_charger" ->
                     List.of("data_energistics:data_charger", "ae2:charger");
             case "data_energistics:data_reassembler" ->
@@ -3051,7 +3052,8 @@ public final class PatternScanner {
     private static boolean hasCraftingMachine(PatternProviderLogicHost host, Level level, BlockPos pos) {
         if (host != null && pos != null) {
             for (var direction : host.getTargets()) {
-                ICraftingMachine machine = ICraftingMachine.of(level, pos, direction);
+                var blockEntity = level.getBlockEntity(pos);
+                ICraftingMachine machine = blockEntity == null ? null : ICraftingMachine.of(blockEntity, direction);
                 if (machine != null && machine.acceptsPlans()) {
                     return true;
                 }
@@ -3060,7 +3062,8 @@ public final class PatternScanner {
         if (level instanceof ServerLevel serverLevel) {
             for (BlockPos target : WirelessHelper.resolveConnectionTargets(serverLevel, host)) {
                 for (var direction : Direction.values()) {
-                    ICraftingMachine machine = ICraftingMachine.of(level, target, direction);
+                    var blockEntity = level.getBlockEntity(target);
+                    ICraftingMachine machine = blockEntity == null ? null : ICraftingMachine.of(blockEntity, direction);
                     if (machine != null && machine.acceptsPlans()) {
                         return true;
                     }
