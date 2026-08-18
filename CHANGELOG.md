@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.2 - 2026-08-18
+
+### Added
+
+- Added an in-terminal checker module toggle.
+- When disabled, only the compact toggle remains visible and the checker no
+  longer intercepts clicks, dragging, or scrolling in the rest of the terminal.
+
+### Changed
+
+- Kept all existing Minecraft 1.21.1 NeoForge machine, addon pattern provider,
+  wireless provider, and packaged-pattern compatibility.
+
 ## 1.0.1 - 2026-08-15
 
 ### Added
