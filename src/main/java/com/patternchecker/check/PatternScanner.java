@@ -2509,7 +2509,10 @@ public final class PatternScanner {
                 || namespace.equals("justdirethings")
                 || namespace.equals("justdynathings")
                 || namespace.equals("jdte")
-                || namespace.equals("industrialforegoing");
+                || namespace.equals("industrialforegoing")
+                || namespace.equals("pneumaticcraft")
+                || namespace.equals("thermal")
+                || namespace.equals("immersiveengineering");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -2749,6 +2752,63 @@ public final class PatternScanner {
                     List.of("minecraft:smelting");
             case "powah:energizing_orb" ->
                     List.of("powah:energizing");
+            case "pneumaticcraft:assembly_controller" ->
+                    List.of("pneumaticcraft:assembly_drill",
+                            "pneumaticcraft:assembly_laser",
+                            "pneumaticcraft:assembly_drill_laser");
+            case "pneumaticcraft:pressure_chamber_interface",
+                    "pneumaticcraft:pressure_chamber_valve" ->
+                    List.of("pneumaticcraft:pressure_chamber");
+            case "pneumaticcraft:refinery" ->
+                    List.of("pneumaticcraft:refinery");
+            case "pneumaticcraft:fluid_mixer" ->
+                    List.of("pneumaticcraft:fluid_mixer");
+            case "pneumaticcraft:thermopneumatic_processing_plant" ->
+                    List.of("pneumaticcraft:thermo_plant");
+            case "thermal:machine_bottler" ->
+                    List.of("thermal:bottler");
+            case "thermal:machine_centrifuge" ->
+                    List.of("thermal:centrifuge");
+            case "thermal:machine_chiller" ->
+                    List.of("thermal:chiller");
+            case "thermal:machine_crucible" ->
+                    List.of("thermal:crucible");
+            case "thermal:machine_crystallizer" ->
+                    List.of("thermal:crystallizer");
+            case "thermal:machine_furnace" ->
+                    List.of("thermal:furnace");
+            case "thermal:machine_insolator" ->
+                    List.of("thermal:insolator");
+            case "thermal:machine_press" ->
+                    List.of("thermal:press");
+            case "thermal:machine_pulverizer" ->
+                    List.of("thermal:pulverizer");
+            case "thermal:machine_pyrolyzer" ->
+                    List.of("thermal:pyrolyzer");
+            case "thermal:machine_refinery" ->
+                    List.of("thermal:refinery");
+            case "thermal:machine_sawmill" ->
+                    List.of("thermal:sawmill");
+            case "thermal:machine_smelter" ->
+                    List.of("thermal:smelter");
+            case "immersiveengineering:alloy_smelter" ->
+                    List.of("immersiveengineering:alloy");
+            case "immersiveengineering:arc_furnace" ->
+                    List.of("immersiveengineering:arc_furnace");
+            case "immersiveengineering:assembler" ->
+                    List.of("immersiveengineering:blueprint");
+            case "immersiveengineering:bottling_machine" ->
+                    List.of("immersiveengineering:bottling_machine");
+            case "immersiveengineering:coke_oven" ->
+                    List.of("immersiveengineering:coke_oven");
+            case "immersiveengineering:crusher" ->
+                    List.of("immersiveengineering:crusher");
+            case "immersiveengineering:metal_press" ->
+                    List.of("immersiveengineering:metal_press");
+            case "immersiveengineering:mixer" ->
+                    List.of("immersiveengineering:mixer");
+            case "immersiveengineering:squeezer" ->
+                    List.of("immersiveengineering:squeezer");
             case "justdynathings:paradox_mixer" ->
                     List.of("justdynathings:paradox_mixer");
             case "justdynathings:reforger" ->
