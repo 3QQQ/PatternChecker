@@ -1,6 +1,13 @@
 {
   "item.patternchecker.pattern_checker_tool": "样板检测工具",
   "item.patternchecker.pattern_checker_tool.tooltip": "饰品或检查工具：放在背包/饰品栏时为 AE2 编码终端添加可拖动检查模块；右键仅打开检查界面。",
+  "patternchecker.menu.panel.title": "检查模块",
+  "patternchecker.menu.panel.enabled": "检查：开",
+  "patternchecker.menu.panel.disabled": "检查：关",
+  "item.patternchecker.pattern_checker_tool.panel_enabled": "终端检查模块：开启（Shift+右键切换）",
+  "item.patternchecker.pattern_checker_tool.panel_disabled": "终端检查模块：关闭（Shift+右键切换）",
+  "patternchecker.tool.panel.enabled": "终端检查模块已开启",
+  "patternchecker.tool.panel.disabled": "终端检查模块已关闭",
   "patternchecker.menu.title": "样板检查",
   "patternchecker.menu.write": "写入",
   "patternchecker.menu.scan": "扫描当前网络",
