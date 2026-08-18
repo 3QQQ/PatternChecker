@@ -45,6 +45,7 @@ public final class PatternTerminalEvents {
     private static Screen activeScreen;
     private static ToolPanel activePanel;
     private static EntryKey persistedSelectionKey;
+    private static boolean terminalPanelEnabled = true;
 
     private record EntryKey(String location, int slot) {
     }
@@ -193,6 +194,7 @@ public final class PatternTerminalEvents {
         private final AE2Button extractButton;
         private final AE2Button uploadButton;
         private final AE2Button writeButton;
+        private final AE2Button panelToggleButton;
         private final AE2Button[] buttons;
 
         private int scroll;
@@ -218,6 +220,13 @@ public final class PatternTerminalEvents {
             this.selectedKey = selectionKey;
             refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
+            panelToggleButton = new AE2Button(
+                    x + width - OUTER_PADDING - 74, y + 2, 74, BUTTON_HEIGHT,
+                    Component.empty(), button -> {
+                terminalPanelEnabled = !terminalPanelEnabled;
+                setButtonsVisible(terminalPanelEnabled);
+                updatePanelToggleButton();
+            });
 
             int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
             scanButton = new AE2Button(
@@ -315,8 +324,14 @@ public final class PatternTerminalEvents {
             if (!PatternCheckClient.getToolList().available() || !isInside(mouseX, mouseY)) {
                 return false;
             }
+            if (!terminalPanelEnabled) {
+                return button == 0 && panelToggleButton.mouseClicked(mouseX, mouseY, button);
+            }
             capturedButton = button;
             if (button != 0) {
+                return true;
+            }
+            if (panelToggleButton.mouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
             if (beginDragging(mouseX, mouseY, button)) {
@@ -354,6 +369,9 @@ public final class PatternTerminalEvents {
         @Override
         public boolean mouseDragged(double mouseX, double mouseY, int button,
                                     double dragX, double dragY) {
+            if (!terminalPanelEnabled) {
+                return false;
+            }
             if (capturedButton != button) {
                 return false;
             }
@@ -365,6 +383,9 @@ public final class PatternTerminalEvents {
 
         @Override
         public boolean mouseReleased(double mouseX, double mouseY, int button) {
+            if (!terminalPanelEnabled) {
+                return panelToggleButton.mouseReleased(mouseX, mouseY, button);
+            }
             if (capturedButton != button) {
                 return false;
             }
@@ -416,6 +437,9 @@ public final class PatternTerminalEvents {
             if (!PatternCheckClient.getToolList().available() || !isInside(mouseX, mouseY)) {
                 return false;
             }
+            if (!terminalPanelEnabled) {
+                return false;
+            }
             int maxScroll = Math.max(0, entries().size() - visibleRows());
             int direction = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
             scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
@@ -449,6 +473,13 @@ public final class PatternTerminalEvents {
             }
             setButtonsVisible(payload.available());
             if (!payload.available()) {
+                return;
+            }
+            if (!terminalPanelEnabled) {
+                gui.fill(getX(), getY(), getX() + getWidth(), getY() + 22, PANEL_COLOR);
+                gui.drawString(minecraft().font,
+                        Component.translatable("patternchecker.menu.panel.title"),
+                        getX() + 6, getY() + 6, TEXT_COLOR, false);
                 return;
             }
             if (selected < 0 && selectedKey != null) {
@@ -514,10 +545,18 @@ public final class PatternTerminalEvents {
             gui.pose().pushPose();
             gui.pose().translate(0.0F, 0.0F, OVERLAY_Z);
             renderWidget(gui, mouseX, mouseY, partialTick);
-            for (AE2Button panelButton : buttons) {
-                panelButton.render(gui, mouseX, mouseY, partialTick);
+            if (PatternCheckClient.getToolList().available()) {
+                updatePanelToggleButton();
+                panelToggleButton.render(gui, mouseX, mouseY, partialTick);
+                if (terminalPanelEnabled) {
+                    for (AE2Button panelButton : buttons) {
+                        panelButton.render(gui, mouseX, mouseY, partialTick);
+                    }
+                }
             }
-            renderSelectedIssueTooltip(gui, mouseX, mouseY);
+            if (terminalPanelEnabled) {
+                renderSelectedIssueTooltip(gui, mouseX, mouseY);
+            }
             gui.pose().popPose();
         }
 
@@ -530,6 +569,13 @@ public final class PatternTerminalEvents {
             extractButton.visible = visible;
             uploadButton.visible = visible;
             writeButton.visible = visible;
+        }
+
+        private void updatePanelToggleButton() {
+            panelToggleButton.setMessage(Component.translatable(terminalPanelEnabled
+                    ? "patternchecker.menu.panel.enabled"
+                    : "patternchecker.menu.panel.disabled"));
+            panelToggleButton.visible = PatternCheckClient.getToolList().available();
         }
 
         private void clampToScreen() {
@@ -552,6 +598,8 @@ public final class PatternTerminalEvents {
             inputButton.setY(y + TOGGLE_BUTTON_Y);
             duplicateButton.setX(x + OUTER_PADDING + splitWidth + BUTTON_GAP);
             duplicateButton.setY(y + TOGGLE_BUTTON_Y);
+            panelToggleButton.setX(x + width - OUTER_PADDING - 74);
+            panelToggleButton.setY(y + 2);
 
             int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
