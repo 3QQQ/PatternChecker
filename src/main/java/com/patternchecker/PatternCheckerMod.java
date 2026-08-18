@@ -15,6 +15,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
@@ -46,7 +47,8 @@ public final class PatternCheckerMod {
             "pattern_edit",
             () -> new MenuType<>(PatternEditMenu::fromNetwork, FeatureFlags.DEFAULT_FLAGS));
 
-    public PatternCheckerMod(IEventBus modEventBus) {
+    public PatternCheckerMod() {
+        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(modEventBus);
         MENUS.register(modEventBus);
 
