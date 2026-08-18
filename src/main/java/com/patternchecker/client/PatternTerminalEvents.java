@@ -331,6 +331,9 @@ public final class PatternTerminalEvents {
             if (button != 0) {
                 return true;
             }
+            if (panelToggleButton.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
             if (beginDragging(mouseX, mouseY, button)) {
                 return true;
             }
