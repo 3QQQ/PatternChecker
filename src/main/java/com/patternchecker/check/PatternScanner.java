@@ -1201,7 +1201,18 @@ public final class PatternScanner {
 
     private static String recipeTypeId(RecipeType<?> type) {
         ResourceLocation id = BuiltInRegistries.RECIPE_TYPE.getKey(type);
-        return id == null ? "" : id.toString();
+        if (id != null) {
+            return id.toString();
+        }
+        try {
+            java.lang.reflect.Field field = type.getClass().getField("registryName");
+            Object value = field.get(type);
+            if (value instanceof ResourceLocation registryName) {
+                return registryName.toString();
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+        }
+        return "";
     }
 
     /**
@@ -1230,6 +1241,8 @@ public final class PatternScanner {
                     aliases("getOutput", "output"));
             case "expatternprovider" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getOutput", "output"));
+            case "gtceu" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("outputs", "getOutputs"));
             case "ae2lt" -> ae2LtRecipeOutputs(recipe, registryAccess);
             case "data_energistics" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getResult", "result"), aliases("getResults", "results"),
@@ -1579,6 +1592,8 @@ public final class PatternScanner {
                     aliases("getIngredient", "ingredient"),
                     aliases("getFluidInput", "fluidInput", "inputFluid"),
                     aliases("getCatalyst", "catalyst"));
+            case "gtceu" -> recipeRequirementsFromMembers(recipe,
+                    aliases("inputs", "getInputs"));
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -2445,7 +2460,8 @@ public final class PatternScanner {
                 || id.toString().equals("advanced_ae:quantum_crafter")
                 || id.toString().equals("extendedae_plus:assembler_matrix_crafter_plus")
                 || id.toString().equals("appflux:flux_accessor")
-                || id.toString().equals("ae2lt:pigmee_molecular_assembler");
+                || id.toString().equals("ae2lt:pigmee_molecular_assembler")
+                || id.toString().equals("create:mechanical_crafter");
     }
 
     /**
@@ -2512,7 +2528,11 @@ public final class PatternScanner {
                 || namespace.equals("industrialforegoing")
                 || namespace.equals("pneumaticcraft")
                 || namespace.equals("thermal")
-                || namespace.equals("immersiveengineering");
+                || namespace.equals("immersiveengineering")
+                || (namespace.equals("create") && isCreateMachinePath(id.getPath()))
+                || (namespace.equals("createaddition") && isCreateAdditionMachinePath(id.getPath()))
+                || (namespace.equals("createoreexcavation") && isCreateOreMachinePath(id.getPath()))
+                || (namespace.equals("gtceu") && isGtceuMachinePath(id.getPath()));
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -2690,6 +2710,9 @@ public final class PatternScanner {
             String type = exactMekanismRecipeType(blockId.getPath());
             return type == null ? List.of() : List.of(type);
         }
+        if (blockId.getNamespace().equals("gtceu")) {
+            return exactGtceuRecipeTypeIds(blockId.getPath());
+        }
         if (blockId.getNamespace().equals("modular_machinery_reborn")
                 && (blockId.getPath().equals("controller")
                 || blockId.getPath().startsWith("inputbus_")
@@ -2697,6 +2720,31 @@ public final class PatternScanner {
             return List.of(MMR_RECIPE_TYPE);
         }
         return switch (id) {
+            case "create:mechanical_press" ->
+                    List.of("create:pressing");
+            case "create:mechanical_mixer" ->
+                    List.of("create:mixing");
+            case "create:crushing_wheel", "create:crushing_wheel_controller" ->
+                    List.of("create:crushing");
+            case "create:mechanical_saw" ->
+                    List.of("create:cutting");
+            case "create:millstone" ->
+                    List.of("create:milling");
+            case "create:deployer" ->
+                    List.of("create:deploying");
+            case "create:basin" ->
+                    List.of("create:mixing", "create:compacting", "create:filling", "create:emptying");
+            case "create:encased_fan" ->
+                    List.of("create:fan_washing", "create:fan_splashing",
+                            "create:fan_smoking", "create:fan_blasting", "create:fan_haunting");
+            case "create:spout" ->
+                    List.of("create:filling", "create:emptying");
+            case "createaddition:rolling_mill" ->
+                    List.of("createaddition:rolling");
+            case "createoreexcavation:drilling_machine" ->
+                    List.of("createoreexcavation:drilling");
+            case "createoreexcavation:extractor" ->
+                    List.of("createoreexcavation:extractor");
             case "ae2:charger", "expatternprovider:ex_charger" ->
                     List.of("ae2:charger");
             case "ae2:inscriber", "expatternprovider:ex_inscriber" ->
@@ -2843,6 +2891,106 @@ public final class PatternScanner {
         return path.equals("energized_smelter")
                 || path.equals("me_energized_smelter")
                 || path.endsWith("_smelting_factory");
+    }
+
+    private static List<String> exactGtceuRecipeTypeIds(String path) {
+        if (path.equals("electric_blast_furnace")) {
+            return List.of("gtceu:blast");
+        }
+        if (path.equals("primitive_blast_furnace")) {
+            return List.of("gtceu:primitive_blast_furnace");
+        }
+        if (path.equals("alloy_blast_smelter")) {
+            return List.of("gtceu:alloy_smelter");
+        }
+        if (path.equals("multi_smelter")) {
+            return List.of("gtceu:multi_smelter");
+        }
+        if (path.equals("distillation_tower")) {
+            return List.of("gtceu:distillation");
+        }
+        if (path.equals("large_material_press")) {
+            return List.of("gtceu:forming_press");
+        }
+        String normalized = path.replaceFirst(
+                "^(lv|mv|hv|ev|iv|luv|zpm|uv|uhv|uev|uiv|uxv|opv)_", "");
+        if (normalized.endsWith("_alloy_smelter")) {
+            return List.of("gtceu:alloy_smelter");
+        }
+        if (normalized.endsWith("_assembler")) {
+            return List.of("gtceu:assembler");
+        }
+        if (normalized.endsWith("_centrifuge")) {
+            return List.of("gtceu:centrifuge");
+        }
+        if (normalized.endsWith("_chemical_bath")) {
+            return List.of("gtceu:chemical_bath");
+        }
+        if (normalized.endsWith("_chemical_reactor")) {
+            return List.of("gtceu:chemical");
+        }
+        if (normalized.endsWith("_circuit_assembler")) {
+            return List.of("gtceu:circuit_assembler");
+        }
+        if (normalized.endsWith("_compressor")) {
+            return List.of("gtceu:compressor");
+        }
+        if (normalized.endsWith("_cutter")) {
+            return List.of("gtceu:cutter");
+        }
+        if (normalized.endsWith("_distillery")) {
+            return List.of("gtceu:distillery");
+        }
+        if (normalized.endsWith("_electrolyzer")) {
+            return List.of("gtceu:electrolyzer");
+        }
+        if (normalized.endsWith("_extractor")) {
+            return List.of("gtceu:extractor");
+        }
+        if (normalized.endsWith("_forge_hammer")) {
+            return List.of("gtceu:forge_hammer");
+        }
+        if (normalized.endsWith("_forming_press")) {
+            return List.of("gtceu:forming_press");
+        }
+        if (normalized.endsWith("_mixer")) {
+            return List.of("gtceu:mixer");
+        }
+        if (normalized.endsWith("_ore_washer")) {
+            return List.of("gtceu:ore_washer");
+        }
+        if (normalized.endsWith("_rock_crusher")) {
+            return List.of("gtceu:rock_breaker");
+        }
+        if (normalized.endsWith("_sifter")) {
+            return List.of("gtceu:sifter");
+        }
+        if (normalized.endsWith("_thermal_centrifuge")) {
+            return List.of("gtceu:thermal_centrifuge");
+        }
+        return List.of();
+    }
+
+    private static boolean isGtceuMachinePath(String path) {
+        return !exactGtceuRecipeTypeIds(path).isEmpty();
+    }
+
+    private static boolean isCreateMachinePath(String path) {
+        return switch (path) {
+            case "mechanical_press", "mechanical_mixer", "crushing_wheel",
+                    "crushing_wheel_controller", "mechanical_saw", "millstone",
+                    "deployer", "basin", "encased_fan", "spout",
+                    "mechanical_crafter" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isCreateAdditionMachinePath(String path) {
+        return path.equals("rolling_mill");
+    }
+
+    private static boolean isCreateOreMachinePath(String path) {
+        return path.equals("drilling_machine") || path.equals("extractor");
     }
 
     private static String exactMekanismRecipeType(String path) {
