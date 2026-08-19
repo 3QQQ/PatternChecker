@@ -210,7 +210,7 @@ public final class PatternTerminalEvents {
         private static final int LIST_SIDE = 5;
         private static final int LIST_BOTTOM_RESERVED = 58;
         private static final int ROW_HEIGHT = 22;
-        private static final int ACTION_BUTTONS = 4;
+        private static final int ACTION_BUTTONS = 5;
         private static final int TOOLTIP_WIDTH = 240;
         private static final float OVERLAY_Z = 500.0F;
 
@@ -219,6 +219,7 @@ public final class PatternTerminalEvents {
         private final AE2Button inputButton;
         private final AE2Button duplicateButton;
         private final AE2Button highlightButton;
+        private final AE2Button editButton;
         private final AE2Button extractButton;
         private final AE2Button uploadButton;
         private final AE2Button writeButton;
@@ -287,15 +288,17 @@ public final class PatternTerminalEvents {
             int remainder = available % ACTION_BUTTONS;
             highlightButton = actionButton(0, actionY, actionWidth, remainder,
                     "patternchecker.menu.highlight", PatternToolActionPayload.ACTION_HIGHLIGHT);
-            extractButton = actionButton(1, actionY, actionWidth, remainder,
+            editButton = actionButton(1, actionY, actionWidth, remainder,
+                    "patternchecker.menu.edit", PatternToolActionPayload.ACTION_EDIT);
+            extractButton = actionButton(2, actionY, actionWidth, remainder,
                     "patternchecker.menu.extract", PatternToolActionPayload.ACTION_EXTRACT);
-            uploadButton = actionButton(2, actionY, actionWidth, remainder,
+            uploadButton = actionButton(3, actionY, actionWidth, remainder,
                     "patternchecker.menu.upload", PatternToolActionPayload.ACTION_UPLOAD);
-            writeButton = actionButton(3, actionY, actionWidth, remainder,
+            writeButton = actionButton(4, actionY, actionWidth, remainder,
                     "patternchecker.menu.write", PatternToolActionPayload.ACTION_WRITE);
             buttons = new AE2Button[]{
                     scanButton, unbindButton, inputButton, duplicateButton,
-                    highlightButton, extractButton, uploadButton, writeButton
+                    highlightButton, editButton, extractButton, uploadButton, writeButton
             };
             moveButtons();
         }
@@ -664,6 +667,7 @@ public final class PatternTerminalEvents {
             inputButton.visible = visible;
             duplicateButton.visible = visible;
             highlightButton.visible = visible;
+            editButton.visible = visible;
             extractButton.visible = visible;
             uploadButton.visible = visible;
             writeButton.visible = visible;
@@ -741,7 +745,7 @@ public final class PatternTerminalEvents {
             int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
-            AE2Button[] actions = {highlightButton, extractButton, uploadButton, writeButton};
+            AE2Button[] actions = {highlightButton, editButton, extractButton, uploadButton, writeButton};
             for (int i = 0; i < actions.length; i++) {
                 int widthBefore = i * baseWidth + Math.min(i, remainder);
                 actions[i].setX(x + OUTER_PADDING + i * BUTTON_GAP + widthBefore);
@@ -762,6 +766,7 @@ public final class PatternTerminalEvents {
                             : "patternchecker.menu.duplicate.off"));
             boolean canAct = hasSelectedProvider();
             highlightButton.active = canAct;
+            editButton.active = canAct;
             extractButton.active = canAct;
             uploadButton.active = canAct;
             writeButton.active = canAct;

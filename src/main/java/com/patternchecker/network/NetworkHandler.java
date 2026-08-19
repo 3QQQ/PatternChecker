@@ -154,6 +154,7 @@ public final class NetworkHandler {
                     case PatternToolActionPayload.ACTION_HIGHLIGHT -> PatternActions.highlight(player, entry);
                     case PatternToolActionPayload.ACTION_EXTRACT -> PatternActions.extract(player, entry);
                     case PatternToolActionPayload.ACTION_UPLOAD -> PatternActions.upload(player, entry);
+                    case PatternToolActionPayload.ACTION_EDIT -> PatternActions.openEdit(player, entry);
                     case PatternToolActionPayload.ACTION_SELECT -> PatternActions.loadEntry(player, entry);
                     default -> {
                     }

@@ -22,6 +22,7 @@ public record PatternToolActionPayload(int action, int entryIndex) implements Cu
     public static final int ACTION_WRITE = 7;
     public static final int ACTION_SYNC = 8;
     public static final int ACTION_TOGGLE_DUPLICATE = 9;
+    public static final int ACTION_EDIT = 10;
 
     public static final Type<PatternToolActionPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("patternchecker", "tool_action"));

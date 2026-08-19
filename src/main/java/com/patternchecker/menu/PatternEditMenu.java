@@ -45,6 +45,7 @@ public class PatternEditMenu extends AbstractContainerMenu {
 
     private final SimpleContainer grid;
     private ToolEntry entry; // server-side only
+    private boolean completed;
 
     public PatternEditMenu(int containerId, Inventory playerInventory) {
         this(containerId, playerInventory, null, new SimpleContainer(GRID_CONTAINER_SIZE));
@@ -97,6 +98,10 @@ public class PatternEditMenu extends AbstractContainerMenu {
 
     public ToolEntry getEntry() {
         return entry;
+    }
+
+    public void markCompleted() {
+        completed = true;
     }
 
     @Override
@@ -195,6 +200,15 @@ public class PatternEditMenu extends AbstractContainerMenu {
     @Override
     public void removed(Player player) {
         super.removed(player);
+        if (!completed) {
+            ItemStack blank = grid.getItem(BLANK_SLOT);
+            if (!blank.isEmpty()) {
+                grid.setItem(BLANK_SLOT, ItemStack.EMPTY);
+                if (!player.getInventory().add(blank)) {
+                    player.drop(blank, false);
+                }
+            }
+        }
         grid.stopOpen(player);
     }
 
