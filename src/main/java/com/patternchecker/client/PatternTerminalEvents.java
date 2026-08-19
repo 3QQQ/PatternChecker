@@ -251,12 +251,12 @@ public final class PatternTerminalEvents {
             refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
             panelToggleButton = new PatternButton(
-                    x + width - OUTER_PADDING - 74, y + 2, 74, BUTTON_HEIGHT,
-                Component.empty(), button -> {
-                terminalPanelEnabled = !terminalPanelEnabled;
-                setPanelExpanded(terminalPanelEnabled);
-                updatePanelToggleButton();
-            });
+                    x + width - COLLAPSED_SIZE, y, COLLAPSED_SIZE, COLLAPSED_SIZE,
+                    Component.empty(), button -> {
+                        terminalPanelEnabled = !terminalPanelEnabled;
+                        setPanelExpanded(terminalPanelEnabled);
+                        updatePanelToggleButton();
+                    });
 
             int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
             scanButton = new PatternButton(
@@ -642,8 +642,13 @@ public final class PatternTerminalEvents {
             inputButton.setY(y + TOGGLE_BUTTON_Y);
             duplicateButton.setX(x + OUTER_PADDING + splitWidth + BUTTON_GAP);
             duplicateButton.setY(y + TOGGLE_BUTTON_Y);
-            panelToggleButton.setX(x + width - OUTER_PADDING - 74);
-            panelToggleButton.setY(y + 2);
+            // Keep the icon button exactly the same size as the collapsed
+            // module and pin it to the module's top-right corner. In the
+            // collapsed state this resolves to the whole 20x20 widget,
+            // while in the expanded state it becomes the module's header
+            // toggle without covering the title.
+            panelToggleButton.setX(x + width - COLLAPSED_SIZE);
+            panelToggleButton.setY(y);
 
             int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
