@@ -53,6 +53,7 @@ public final class PatternCheckerMod {
         MENUS.register(modEventBus);
 
         MinecraftForge.EVENT_BUS.addListener(PatternCheckCommand::register);
+        MinecraftForge.EVENT_BUS.addListener(PatternCheckCommand::onServerTick);
         MinecraftForge.EVENT_BUS.addListener(HighlightManager::onServerTick);
         modEventBus.addListener(PatternCheckerMod::addToCreativeTab);
         NetworkHandler.register();

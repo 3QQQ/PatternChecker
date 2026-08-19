@@ -139,7 +139,7 @@ public final class PatternActions {
         if (tool.isEmpty()) {
             return;
         }
-        PatternCheckCommand.scanTargeted(player, true);
+        PatternCheckCommand.scheduleTargetedScan(player);
         player.openMenu(new SimpleMenuProvider(
                 (containerId, inventory, ignored) -> new com.patternchecker.menu.PatternCheckMenu(
                         containerId, inventory),

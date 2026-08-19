@@ -23,15 +23,24 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * /patterncheck scan        - scans the ME network the player is looking at
  * /patterncheck scan all    - scans every loaded ME network in the dimension
  */
 public final class PatternCheckCommand {
+
+    private static final Map<UUID, Integer> DEFERRED_SCANS =
+            Collections.synchronizedMap(new HashMap<>());
 
     private PatternCheckCommand() {
     }
@@ -131,6 +140,42 @@ public final class PatternCheckCommand {
         }
         reportAndStore(source, level, List.of(PatternScanner.scanGrid(bound, level)), silent);
         return true;
+    }
+
+    /**
+     * Queues the initial scan so opening the tool menu is not blocked by a
+     * large recipe registry. Explicit Scan button/command actions remain
+     * synchronous and therefore still provide an immediate refresh request.
+     */
+    public static void scheduleTargetedScan(ServerPlayer player) {
+        if (player != null) {
+            // Leave a couple of client frames for the menu to open before
+            // starting the expensive network/recipe scan.
+            DEFERRED_SCANS.put(player.getUUID(), player.server.getTickCount() + 2);
+        }
+    }
+
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || DEFERRED_SCANS.isEmpty()) {
+            return;
+        }
+        int tick = event.getServer().getTickCount();
+        List<UUID> pending = new ArrayList<>();
+        synchronized (DEFERRED_SCANS) {
+            DEFERRED_SCANS.entrySet().removeIf(entry -> {
+                if (entry.getValue() <= tick) {
+                    pending.add(entry.getKey());
+                    return true;
+                }
+                return false;
+            });
+        }
+        for (UUID playerId : pending) {
+            ServerPlayer player = event.getServer().getPlayerList().getPlayer(playerId);
+            if (player != null && player.connection != null) {
+                scanTargeted(player, true);
+            }
+        }
     }
 
     public static List<ScanEntry> buildEntries(ServerLevel level, List<ScanResult> results,
