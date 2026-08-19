@@ -400,9 +400,7 @@ public final class PatternScanner {
         }
         BlockPos pos = be.getBlockPos();
         boolean provider = isPatternProviderHost(owner);
-        String location = Component.translatable(
-                provider ? "patternchecker.location.provider" : "patternchecker.location.container",
-                pos.toShortString()).getString();
+        String location = describeContainer(owner, be, level, provider, pos);
         Map<AEItemKey, List<IPatternDetails>> providerDetails = new HashMap<>();
         if (owner instanceof PatternProviderLogicHost host) {
             try {
@@ -438,6 +436,25 @@ public final class PatternScanner {
                     issues, verdicts, patterns, duplicateCandidates,
                     inputIssueCandidates, scannedCraftingOutputs, 1, context);
         }
+    }
+
+    private static String describeContainer(
+            Object owner, BlockEntity blockEntity, Level level,
+            boolean provider, BlockPos pos) {
+        Component customName = null;
+        Object ownerName = readMember(owner, "getCustomName");
+        if (ownerName instanceof Component component) {
+            customName = component;
+        }
+        if (customName == null && blockEntity != null) {
+            customName = blockEntity.getBlockState().getBlock().getName();
+        }
+        if (customName == null) {
+            customName = Component.translatable(
+                    provider ? "patternchecker.location.provider"
+                            : "patternchecker.location.container");
+        }
+        return customName.getString() + " [" + pos.toShortString() + "]";
     }
 
     private static final class RecipeIndex {

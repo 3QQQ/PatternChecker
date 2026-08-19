@@ -1,20 +1,16 @@
 package com.patternchecker.client.render;
 
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.blaze3d.vertex.VertexFormat;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.patternchecker.PatternCheckerMod;
 import com.patternchecker.client.PatternCheckClient;
 import com.patternchecker.network.HighlightPayload;
 import com.patternchecker.network.NetworkHandler;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -69,27 +65,16 @@ public final class HighlightRenderer {
         // relative space. Adding rotation again would double-transform it.
         pose.translate(-camera.x, -camera.y, -camera.z);
 
-        // Force see-through rendering regardless of render type state.
-        RenderSystem.disableDepthTest();
-        RenderSystem.disableCull();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        VertexConsumer consumer = buffer;
-        float hueBase = (System.currentTimeMillis() % 1200L) / 1200f;
+        var buffers = Minecraft.getInstance().renderBuffers().bufferSource();
+        VertexConsumer consumer = buffers.getBuffer(RenderType.lines());
         for (HighlightPayload.HighlightData data : highlights) {
             if (!data.dimension().equals(dimension)) {
                 continue;
             }
-            addWireframe(consumer, pose.last().pose(), data.pos(), hueBase);
+            AABB box = new AABB(data.pos()).inflate(0.025D);
+            LevelRenderer.renderLineBox(pose, consumer, box, 1.0F, 0.15F, 0.85F, 1.0F);
         }
-        BufferUploader.drawWithShader(buffer.end());
-        RenderSystem.enableDepthTest();
-        RenderSystem.enableCull();
-        RenderSystem.disableBlend();
+        buffers.endBatch(RenderType.lines());
         pose.popPose();
     }
 

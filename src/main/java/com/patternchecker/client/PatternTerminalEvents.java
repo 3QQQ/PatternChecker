@@ -233,6 +233,8 @@ public final class PatternTerminalEvents {
         private final int expandedHeight;
         private int capturedButton = -1;
         private boolean dragging;
+        private boolean scrollbarDragging;
+        private int scrollbarDragOffset;
         private int dragOffsetX;
         private int dragOffsetY;
         private int syncDelayFrames = 12;
@@ -368,6 +370,9 @@ public final class PatternTerminalEvents {
             if (beginDragging(mouseX, mouseY, button)) {
                 return true;
             }
+            if (beginScrollbarDragging(mouseX, mouseY, button)) {
+                return true;
+            }
             for (PatternButton panelButton : buttons) {
                 if (panelButton.mouseClicked(mouseX, mouseY, button)) {
                     return true;
@@ -406,6 +411,10 @@ public final class PatternTerminalEvents {
             if (capturedButton != button) {
                 return false;
             }
+            if (scrollbarDragging) {
+                updateScrollFromMouse(mouseY);
+                return true;
+            }
             if (dragging) {
                 continueDragging(mouseX, mouseY, button);
             }
@@ -419,6 +428,11 @@ public final class PatternTerminalEvents {
             }
             if (capturedButton != button) {
                 return false;
+            }
+            if (scrollbarDragging) {
+                scrollbarDragging = false;
+                capturedButton = -1;
+                return true;
             }
             for (PatternButton panelButton : buttons) {
                 panelButton.mouseReleased(mouseX, mouseY, button);
@@ -460,6 +474,53 @@ public final class PatternTerminalEvents {
             }
             dragging = false;
             return true;
+        }
+
+        private boolean beginScrollbarDragging(double mouseX, double mouseY, int button) {
+            if (button != 0 || !terminalPanelEnabled) {
+                return false;
+            }
+            int entryCount = entries().size();
+            int visible = visibleRows();
+            if (entryCount <= visible) {
+                return false;
+            }
+            int listRight = getX() + getWidth() - LIST_SIDE;
+            int trackTop = getY() + LIST_TOP + 2;
+            int trackBottom = listBottom() - 2;
+            int trackHeight = trackBottom - trackTop;
+            int thumbHeight = Math.max(8, trackHeight * visible / entryCount);
+            int maxScroll = Math.max(1, entryCount - visible);
+            int thumbY = trackTop + scroll * Math.max(0, trackHeight - thumbHeight) / maxScroll;
+            if (mouseX < listRight - 8 || mouseX > listRight + 2
+                    || mouseY < trackTop || mouseY > trackBottom) {
+                return false;
+            }
+            scrollbarDragging = true;
+            scrollbarDragOffset = mouseY >= thumbY && mouseY <= thumbY + thumbHeight
+                    ? (int) mouseY - thumbY
+                    : thumbHeight / 2;
+            updateScrollFromMouse(mouseY);
+            return true;
+        }
+
+        private void updateScrollFromMouse(double mouseY) {
+            int entryCount = entries().size();
+            int visible = visibleRows();
+            int maxScroll = Math.max(0, entryCount - visible);
+            if (maxScroll == 0) {
+                scroll = 0;
+                return;
+            }
+            int trackTop = getY() + LIST_TOP + 2;
+            int trackBottom = listBottom() - 2;
+            int trackHeight = trackBottom - trackTop;
+            int thumbHeight = Math.max(8, trackHeight * visible / entryCount);
+            int travel = Math.max(1, trackHeight - thumbHeight);
+            int thumbY = Math.max(trackTop,
+                    Math.min(trackTop + travel, (int) mouseY - scrollbarDragOffset));
+            scroll = Math.max(0, Math.min(maxScroll,
+                    Math.round((thumbY - trackTop) * maxScroll / (float) travel)));
         }
 
         @Override
