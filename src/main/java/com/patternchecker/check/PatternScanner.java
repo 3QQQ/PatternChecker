@@ -206,18 +206,34 @@ public final class PatternScanner {
                     if (recipe.getType() == RecipeType.CRAFTING) {
                         continue;
                     }
-                    MmrRecipeData mmrRecipe = mmrRecipeData(recipe);
-                    List<RecipeOutput> outputs = List.copyOf(mmrRecipe == null
-                            ? recipeOutputs(recipe, registryAccess)
-                            : mmrRecipe.outputs());
+                    MmrRecipeData mmrRecipe;
+                    List<RecipeOutput> outputs;
+                    try {
+                        mmrRecipe = mmrRecipeData(recipe);
+                        outputs = List.copyOf(mmrRecipe == null
+                                ? recipeOutputs(recipe, registryAccess)
+                                : mmrRecipe.outputs());
+                    } catch (RuntimeException | LinkageError ignored) {
+                        // An optional recipe implementation must never abort
+                        // the whole network scan. It is safer to skip one
+                        // opaque recipe than to stop after the first few
+                        // pattern containers.
+                        continue;
+                    }
                     if (outputs.isEmpty()) {
+                        continue;
+                    }
+                    List<RecipeRequirement> requirements;
+                    try {
+                        requirements = List.copyOf(mmrRecipe == null
+                                ? recipeRequirements(recipe)
+                                : mmrRecipe.requirements());
+                    } catch (RuntimeException | LinkageError ignored) {
                         continue;
                     }
                     PreparedRecipe prepared = new PreparedRecipe(
                             recipe.getType(),
-                            List.copyOf(mmrRecipe == null
-                                    ? recipeRequirements(recipe)
-                                    : mmrRecipe.requirements()),
+                            requirements,
                             outputs,
                             mmrRecipe == null ? null : mmrRecipe.machineId(),
                             requiresAllRecipeOutputs(recipe));
@@ -405,6 +421,19 @@ public final class PatternScanner {
         }
         if (owner instanceof AEBasePart part) {
             return part.getBlockEntity();
+        }
+        // GTCEu MetaMachine owners are not BlockEntity instances themselves.
+        // Resolve their holder/self bridge without linking to the optional
+        // GTCEu classes.
+        for (String methodName : new String[]{"getBlockEntity", "getHolder", "self"}) {
+            Object value = readMember(owner, methodName);
+            if (value instanceof BlockEntity blockEntity) {
+                return blockEntity;
+            }
+            Object self = readMember(value, "self");
+            if (self instanceof BlockEntity blockEntity) {
+                return blockEntity;
+            }
         }
         return null;
     }
@@ -1765,16 +1794,41 @@ public final class PatternScanner {
             payload = readMember(values, "content");
         }
         if (payload != null && payload != values) {
-            RecipeRequirement requirement = sizedIngredientFrom(payload);
+            RecipeRequirement requirement = gtceuRequirementFromPayload(payload);
             if (requirement != null) {
                 requirements.add(requirement);
             }
             return;
         }
-        RecipeRequirement requirement = sizedIngredientFrom(values);
+        RecipeRequirement requirement = gtceuRequirementFromPayload(values);
         if (requirement != null) {
             requirements.add(requirement);
         }
+    }
+
+    private static RecipeRequirement gtceuRequirementFromPayload(Object payload) {
+        if (payload == null) {
+            return null;
+        }
+        if (payload instanceof Ingredient) {
+            return sizedIngredientFrom(payload);
+        }
+        String className = payload.getClass().getName();
+        if (className.endsWith("FluidIngredient")) {
+            Set<String> identifiers = gtceuFluidIdentifiers(payload);
+            return identifiers.isEmpty()
+                    ? null
+                    : new RecipeRequirement(null, identifiers,
+                            Math.max(1L, numericAmount(payload, 1L)));
+        }
+        if (className.endsWith("FluidStack")) {
+            String identifier = gtceuFluidIdentifier(payload);
+            return identifier == null
+                    ? null
+                    : new RecipeRequirement(null, Set.of(identifier),
+                            Math.max(1L, numericAmount(payload, 1L)));
+        }
+        return null;
     }
 
     private static List<RecipeOutput> gtceuRecipeOutputs(
@@ -1833,7 +1887,49 @@ public final class PatternScanner {
                     amount * Math.max(1L, stack.getCount()));
             return;
         }
+        String fluidIdentifier = gtceuFluidIdentifier(payload);
+        if (fluidIdentifier != null) {
+            addUniqueRecipeOutput(outputs, fluidIdentifier, amount);
+            return;
+        }
         addRecipeOutput(outputs, payload);
+    }
+
+    private static Set<String> gtceuFluidIdentifiers(Object ingredient) {
+        Set<String> identifiers = new HashSet<>();
+        Object stacks = readMember(ingredient, "getStacks");
+        if (stacks == null) {
+            stacks = readMember(ingredient, "stacks");
+        }
+        if (stacks instanceof Iterable<?> iterable) {
+            for (Object stack : iterable) {
+                String identifier = gtceuFluidIdentifier(stack);
+                if (identifier != null) {
+                    identifiers.add(identifier);
+                }
+            }
+        } else if (stacks != null && stacks.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(stacks);
+            for (int i = 0; i < length; i++) {
+                String identifier = gtceuFluidIdentifier(
+                        java.lang.reflect.Array.get(stacks, i));
+                if (identifier != null) {
+                    identifiers.add(identifier);
+                }
+            }
+        }
+        return identifiers;
+    }
+
+    private static String gtceuFluidIdentifier(Object stack) {
+        if (stack == null || !stack.getClass().getName().endsWith("FluidStack")) {
+            return null;
+        }
+        Object fluid = readMember(stack, "getFluid");
+        if (fluid instanceof net.minecraft.world.level.material.Fluid minecraftFluid) {
+            return BuiltInRegistries.FLUID.getKey(minecraftFluid).toString();
+        }
+        return null;
     }
 
     private static boolean isGtceuItemOrFluidCapability(Object capability) {
@@ -2008,10 +2104,21 @@ public final class PatternScanner {
      * Mekanism, Resourceful Bees, or another machine mod at compile time.
      */
     private static String resourceIdentifier(Object value) {
-        return resourceIdentifier(value, new HashSet<>());
+        return resourceIdentifier(value, new HashSet<>(), 0);
     }
 
     private static String resourceIdentifier(Object value, Set<Object> visited) {
+        return resourceIdentifier(value, visited, 0);
+    }
+
+    private static String resourceIdentifier(
+            Object value, Set<Object> visited, int depth) {
+        // Optional recipe wrappers can expose mutually-referential values
+        // through getValue()/value(). Never allow one malformed wrapper to
+        // stall the entire network scan.
+        if (depth > 8) {
+            return null;
+        }
         if (value == null || !visited.add(value)) {
             return null;
         }
@@ -2048,14 +2155,14 @@ public final class PatternScanner {
             if (key.isPresent()) {
                 return key.get().location().toString();
             }
-            return resourceIdentifier(holder.value(), visited);
+            return resourceIdentifier(holder.value(), visited, depth + 1);
         }
         for (String methodName : new String[]{"getId", "getRegistryName", "registryName",
                 "location", "getChemicalHolder", "getFluidHolder", "getChemical",
                 "getFluid", "getKey", "getPrimaryKey", "what", "getWhat", "value", "getValue"}) {
             Object nested = invokeNoArg(value, methodName);
             if (nested != null && nested != value) {
-                String identifier = resourceIdentifier(nested, visited);
+                String identifier = resourceIdentifier(nested, visited, depth + 1);
                 if (identifier != null) {
                     return identifier;
                 }
