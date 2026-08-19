@@ -236,6 +236,15 @@ public final class PatternScanner {
                         duplicateCandidates, inputIssueCandidates, scannedCraftingOutputs, totals, context);
             }
         }
+        // GTL's standalone ME Craft Pattern Container keeps 108 patterns but
+        // does not implement AE2's PatternContainer interface. Discover its
+        // MetaMachine through loaded block entities, then require one of the
+        // same multiblock's ME parts to expose this exact grid.
+        if (level instanceof ServerLevel serverLevel) {
+            scanGtlCraftPatternContainers(serverLevel, grid, seen, issues, verdicts,
+                    patterns, duplicateCandidates, inputIssueCandidates,
+                    scannedCraftingOutputs, totals, context);
+        }
 
         // Patterns stored in ME storage (e.g. in cells, usable through the pattern access terminal).
         MEStorage storage = grid.getStorageService().getInventory();
@@ -255,6 +264,92 @@ public final class PatternScanner {
         removeCraftableInputIssues(inputIssueCandidates, scannedCraftingOutputs, issues, level);
         markDuplicatePatterns(duplicateCandidates, issues);
         return new ScanResult(totals[0], totals[1], totals[2], storagePatterns, verdicts, patterns, issues);
+    }
+
+    private static void scanGtlCraftPatternContainers(
+            ServerLevel level, IGrid grid, Set<Object> seen,
+            List<PatternIssue> issues, List<Component> verdicts,
+            List<ScannedPattern> patterns, List<DuplicateCandidate> duplicateCandidates,
+            List<InputIssueCandidate> inputIssueCandidates,
+            Set<AEKey> scannedCraftingOutputs, int[] totals, ScanContext context) {
+        for (var holder : level.getChunkSource().chunkMap.getChunks()) {
+            var chunk = holder.getTickingChunk();
+            if (chunk == null) {
+                continue;
+            }
+            for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+                Object machine = readMember(blockEntity, "getMetaMachine");
+                if (!isGtlCraftPatternContainer(machine)
+                        || !machineBelongsToGrid(machine, grid)
+                        || !seen.add(machine)) {
+                    continue;
+                }
+                scanPatternInventory(machine, grid, level, issues, verdicts, patterns,
+                        duplicateCandidates, inputIssueCandidates, scannedCraftingOutputs,
+                        totals, context);
+            }
+        }
+    }
+
+    private static boolean isGtlCraftPatternContainer(Object machine) {
+        if (machine == null) {
+            return false;
+        }
+        for (Class<?> type = machine.getClass(); type != null; type = type.getSuperclass()) {
+            if ("org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MECraftPatternContainerPartMachine"
+                    .equals(type.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean machineBelongsToGrid(Object machine, IGrid grid) {
+        IGrid direct = gridFromMachine(machine);
+        if (direct != null) {
+            return direct == grid;
+        }
+        Object controllers = readMember(machine, "getControllers");
+        if (!(controllers instanceof Iterable<?> iterable)) {
+            return false;
+        }
+        for (Object controller : iterable) {
+            IGrid controllerGrid = gridFromMachine(controller);
+            if (controllerGrid == grid) {
+                return true;
+            }
+            Object parts = readMember(controller, "getParts");
+            if (parts instanceof Iterable<?> partIterable) {
+                for (Object part : partIterable) {
+                    if (gridFromMachine(part) == grid) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static IGrid gridFromMachine(Object machine) {
+        if (machine == null) {
+            return null;
+        }
+        Object direct = readMember(machine, "getGrid");
+        if (direct instanceof IGrid grid) {
+            return grid;
+        }
+        Object node = readMember(machine, "getMainNode");
+        if (node instanceof IGridNode gridNode) {
+            return gridNode.getGrid();
+        }
+        Object nodeHolder = readMember(machine, "getNodeHolder");
+        if (nodeHolder != null && nodeHolder != machine) {
+            Object holderNode = readMember(nodeHolder, "getMainNode");
+            if (holderNode instanceof IGridNode gridNode) {
+                return gridNode.getGrid();
+            }
+        }
+        return null;
     }
 
     /**
