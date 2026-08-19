@@ -69,7 +69,7 @@ public class PatternCheckMenu extends AbstractContainerMenu {
                 return true;
             }
             switch (id) {
-                case BUTTON_SCAN -> PatternCheckCommand.scanTargeted(serverPlayer, true);
+                case BUTTON_SCAN -> PatternCheckCommand.scheduleTargetedScan(serverPlayer);
                 case BUTTON_CLEAR_HIGHLIGHTS -> HighlightManager.clear(serverPlayer);
                 case BUTTON_UNBIND -> {
                     var tool = BoundNetwork.findTool(serverPlayer);
@@ -81,11 +81,11 @@ public class PatternCheckMenu extends AbstractContainerMenu {
                 }
                 case BUTTON_TOGGLE_INPUT -> {
                     HighlightManager.toggleInputIssues(serverPlayer);
-                    PatternCheckCommand.scanTargeted(serverPlayer, true);
+                    PatternCheckCommand.scheduleTargetedScan(serverPlayer);
                 }
                 case BUTTON_TOGGLE_DUPLICATE -> {
                     HighlightManager.toggleDuplicateIssues(serverPlayer);
-                    PatternCheckCommand.scanTargeted(serverPlayer, true);
+                    PatternCheckCommand.scheduleTargetedScan(serverPlayer);
                 }
                 default -> {
                 }

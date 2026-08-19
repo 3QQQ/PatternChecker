@@ -148,7 +148,7 @@ public final class NetworkHandler {
             }
             switch (payload.action()) {
                 case PatternToolActionPayload.ACTION_SCAN ->
-                        PatternCheckCommand.scanTargeted(player, true);
+                        PatternCheckCommand.scheduleTargetedScan(player);
                 case PatternToolActionPayload.ACTION_UNBIND -> {
                     ItemStack tool = BoundNetwork.findTool(player);
                     if (!tool.isEmpty()) {
@@ -160,11 +160,11 @@ public final class NetworkHandler {
                 }
                 case PatternToolActionPayload.ACTION_TOGGLE_INPUT -> {
                     HighlightManager.toggleInputIssues(player);
-                    PatternCheckCommand.scanTargeted(player, true);
+                    PatternCheckCommand.scheduleTargetedScan(player);
                 }
                 case PatternToolActionPayload.ACTION_TOGGLE_DUPLICATE -> {
                     HighlightManager.toggleDuplicateIssues(player);
-                    PatternCheckCommand.scanTargeted(player, true);
+                    PatternCheckCommand.scheduleTargetedScan(player);
                 }
                 case PatternToolActionPayload.ACTION_WRITE ->
                         PatternActions.uploadCurrentTerminal(player);

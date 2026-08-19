@@ -52,6 +52,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
  * Scans every pattern reachable through an ME network (pattern providers and
@@ -97,6 +98,8 @@ public final class PatternScanner {
 
     private static final Map<Class<?>, Map<String, java.util.Optional<MemberAccessor>>> MEMBER_ACCESSORS =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Level, RecipeIndex> RECIPE_INDEXES =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static volatile java.util.Optional<PackagedAdapterReflection> PACKAGED_ADAPTER_REFLECTION;
 
     private record PackagedAdapterReflection(Method findAdapter, Method requiredAdapterId,
@@ -158,18 +161,15 @@ public final class PatternScanner {
         private final Level level;
         private final Map<IGrid, GridState> gridStates = new IdentityHashMap<>();
         private final Map<Object, MachineState> machineStates = new IdentityHashMap<>();
-        private final Map<Item, List<Recipe<?>>> standardRecipesByOutput = new HashMap<>();
-        private final Map<String, List<PreparedRecipe>> machineRecipesByOutput = new HashMap<>();
+        private final RecipeIndex recipeIndex;
         private final Map<DuplicateSignature, Boolean> currentRecipeMatches = new HashMap<>();
         private final Map<RecipeMatchKey, Boolean> machineRecipeMatches = new HashMap<>();
         private final Map<Object, Map<DuplicateSignature, ProcessingMachineResult>> packagedProviderMatches =
                 new IdentityHashMap<>();
         private final Set<String> loggedMachineMismatches = new HashSet<>();
-        private boolean standardRecipeIndexBuilt;
-        private boolean machineRecipeIndexBuilt;
-
         private ScanContext(Level level) {
             this.level = level;
+            this.recipeIndex = recipeIndex(level);
         }
 
         private GridState gridState(IGrid grid) {
@@ -180,74 +180,11 @@ public final class PatternScanner {
         }
 
         private List<Recipe<?>> standardRecipesFor(Item item) {
-            if (!standardRecipeIndexBuilt) {
-                standardRecipeIndexBuilt = true;
-                var registryAccess = level.registryAccess();
-                for (Recipe<?> recipe : level.getRecipeManager().getRecipes()) {
-                    ItemStack result = recipe.getResultItem(registryAccess);
-                    if (!result.isEmpty()) {
-                        standardRecipesByOutput
-                                .computeIfAbsent(result.getItem(), ignored -> new ArrayList<>())
-                                .add(recipe);
-                    }
-                }
-            }
-            return standardRecipesByOutput.getOrDefault(item, List.of());
+            return recipeIndex.standardRecipesByOutput.getOrDefault(item, List.of());
         }
 
         private List<PreparedRecipe> machineRecipesFor(String identifier) {
-            if (!machineRecipeIndexBuilt) {
-                machineRecipeIndexBuilt = true;
-                var registryAccess = level.registryAccess();
-                for (Recipe<?> recipe : level.getRecipeManager().getRecipes()) {
-                    // Some machine mods implement CraftingRecipe for serializer
-                    // convenience while registering a distinct machine recipe
-                    // type (JDT goo spreading and JDTE infusion are examples).
-                    if (recipe.getType() == RecipeType.CRAFTING) {
-                        continue;
-                    }
-                    MmrRecipeData mmrRecipe;
-                    List<RecipeOutput> outputs;
-                    try {
-                        mmrRecipe = mmrRecipeData(recipe);
-                        outputs = List.copyOf(mmrRecipe == null
-                                ? recipeOutputs(recipe, registryAccess)
-                                : mmrRecipe.outputs());
-                    } catch (RuntimeException | LinkageError ignored) {
-                        // An optional recipe implementation must never abort
-                        // the whole network scan. It is safer to skip one
-                        // opaque recipe than to stop after the first few
-                        // pattern containers.
-                        continue;
-                    }
-                    if (outputs.isEmpty()) {
-                        continue;
-                    }
-                    List<RecipeRequirement> requirements;
-                    try {
-                        requirements = List.copyOf(mmrRecipe == null
-                                ? recipeRequirements(recipe)
-                                : mmrRecipe.requirements());
-                    } catch (RuntimeException | LinkageError ignored) {
-                        continue;
-                    }
-                    PreparedRecipe prepared = new PreparedRecipe(
-                            recipe.getType(),
-                            requirements,
-                            outputs,
-                            mmrRecipe == null ? null : mmrRecipe.machineId(),
-                            requiresAllRecipeOutputs(recipe));
-                    Set<String> indexedOutputs = new HashSet<>();
-                    for (RecipeOutput output : outputs) {
-                        if (output.identifier() != null && indexedOutputs.add(output.identifier())) {
-                            machineRecipesByOutput
-                                    .computeIfAbsent(output.identifier(), ignored -> new ArrayList<>())
-                                    .add(prepared);
-                        }
-                    }
-                }
-            }
-            return machineRecipesByOutput.getOrDefault(identifier, List.of());
+            return recipeIndex.machineRecipesByOutput.getOrDefault(identifier, List.of());
         }
 
         private MachineState machineState(Object host, BlockPos pos) {
@@ -406,6 +343,83 @@ public final class PatternScanner {
                     issues, verdicts, patterns, duplicateCandidates,
                     inputIssueCandidates, scannedCraftingOutputs, 1, context);
         }
+    }
+
+    private static final class RecipeIndex {
+        private final Map<Item, List<Recipe<?>>> standardRecipesByOutput = new HashMap<>();
+        private final Map<String, List<PreparedRecipe>> machineRecipesByOutput = new HashMap<>();
+        private int recipeCount = -1;
+        private Object firstRecipe;
+        private Object lastRecipe;
+
+        private synchronized void refreshIfNeeded(Level level) {
+            List<Recipe<?>> recipes = new ArrayList<>(level.getRecipeManager().getRecipes());
+            Object first = recipes.isEmpty() ? null : recipes.get(0);
+            Object last = recipes.isEmpty() ? null : recipes.get(recipes.size() - 1);
+            if (recipeCount == recipes.size() && firstRecipe == first && lastRecipe == last) {
+                return;
+            }
+
+            standardRecipesByOutput.clear();
+            machineRecipesByOutput.clear();
+            var registryAccess = level.registryAccess();
+            for (Recipe<?> recipe : recipes) {
+                try {
+                    ItemStack result = recipe.getResultItem(registryAccess);
+                    if (!result.isEmpty()) {
+                        standardRecipesByOutput
+                                .computeIfAbsent(result.getItem(), ignored -> new ArrayList<>())
+                                .add(recipe);
+                    }
+                } catch (RuntimeException | LinkageError ignored) {
+                }
+                if (recipe.getType() == RecipeType.CRAFTING) {
+                    continue;
+                }
+                MmrRecipeData mmrRecipe;
+                List<RecipeOutput> outputs;
+                try {
+                    mmrRecipe = mmrRecipeData(recipe);
+                    outputs = List.copyOf(mmrRecipe == null
+                            ? recipeOutputs(recipe, registryAccess)
+                            : mmrRecipe.outputs());
+                } catch (RuntimeException | LinkageError ignored) {
+                    continue;
+                }
+                if (outputs.isEmpty()) {
+                    continue;
+                }
+                List<RecipeRequirement> requirements;
+                try {
+                    requirements = List.copyOf(mmrRecipe == null
+                            ? recipeRequirements(recipe)
+                            : mmrRecipe.requirements());
+                } catch (RuntimeException | LinkageError ignored) {
+                    continue;
+                }
+                PreparedRecipe prepared = new PreparedRecipe(
+                        recipe.getType(), requirements, outputs,
+                        mmrRecipe == null ? null : mmrRecipe.machineId(),
+                        requiresAllRecipeOutputs(recipe));
+                Set<String> indexedOutputs = new HashSet<>();
+                for (RecipeOutput output : outputs) {
+                    if (output.identifier() != null && indexedOutputs.add(output.identifier())) {
+                        machineRecipesByOutput
+                                .computeIfAbsent(output.identifier(), ignored -> new ArrayList<>())
+                                .add(prepared);
+                    }
+                }
+            }
+            recipeCount = recipes.size();
+            firstRecipe = first;
+            lastRecipe = last;
+        }
+    }
+
+    private static RecipeIndex recipeIndex(Level level) {
+        RecipeIndex index = RECIPE_INDEXES.computeIfAbsent(level, ignored -> new RecipeIndex());
+        index.refreshIfNeeded(level);
+        return index;
     }
 
     /**
