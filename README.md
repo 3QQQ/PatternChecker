@@ -1,8 +1,9 @@
-# Pattern Checker
+# Pattern Checker（样板检测工具）
 
-Pattern Checker is a Forge 1.20.1 addon for Applied Energistics 2.
-It scans patterns on an ME network and reports invalid recipes, incompatible
-machines, unavailable inputs, and duplicate patterns.
+Pattern Checker（中文名：样板检测工具）is an Applied Energistics 2 addon for
+Minecraft 1.20.1 Forge and 1.21.1 NeoForge. This branch provides the Forge
+1.20.1 build and scans patterns on an ME network for invalid recipes,
+incompatible machines, unavailable inputs, and duplicate patterns.
 
 ## Features
 
@@ -12,11 +13,14 @@ machines, unavailable inputs, and duplicate patterns.
 - Pattern highlighting, extraction, upload, editing, and safe in-place writing.
 - Processing-machine compatibility checks.
 - Toggleable input-supply and duplicate-pattern checks.
+- In-terminal checker module enable/disable switch that leaves other terminal
+  controls unobstructed when disabled.
 - Crafting, processing, smithing, and stonecutting pattern writing.
 
 ## Development
 
-This branch targets Java 17, Minecraft 1.20.1, and Forge 47.4.0.
+This branch targets Java 17, Minecraft 1.20.1, and Forge 47.4.0. The matching
+NeoForge 1.21.1 build is maintained on the `main` branch.
 
 Required development JARs are loaded from `libs/` and are intentionally not
 committed:

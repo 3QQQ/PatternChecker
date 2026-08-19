@@ -40,6 +40,7 @@ public final class PatternTerminalEvents {
     private static final int MODULE_WIDTH = 158;
     private static final int MODULE_HEIGHT = 218;
     private static final int MODULE_GAP = 4;
+    private static final int COLLAPSED_SIZE = 20;
     private static int savedOffsetX;
     private static int savedOffsetY;
     private static Screen activeScreen;
@@ -63,17 +64,25 @@ public final class PatternTerminalEvents {
         }
         NetworkHandler.clearPendingToolList();
         int moduleHeight = Math.min(MODULE_HEIGHT, screenHeight(screen));
-        int anchorX = MODULE_GAP;
-        int anchorY = Minecraft.getInstance().getWindow().getGuiScaledHeight()
-                - moduleHeight - MODULE_GAP;
+        int anchorX = screenGuiLeft(screen) - 2;
+        int anchorY = screenGuiTop(screen) + 6 + COLLAPSED_SIZE + 2;
+        int panelWidth = terminalPanelEnabled ? MODULE_WIDTH : COLLAPSED_SIZE;
+        int panelHeight = terminalPanelEnabled ? moduleHeight : COLLAPSED_SIZE;
+        int panelX = terminalPanelEnabled
+                ? anchorX - (MODULE_WIDTH - COLLAPSED_SIZE)
+                : anchorX;
+        int panelY = terminalPanelEnabled
+                ? anchorY + COLLAPSED_SIZE - moduleHeight
+                : anchorY;
         EntryKey selectionKey = activePanel != null ? activePanel.selectedKey : persistedSelectionKey;
         ToolPanel panel = new ToolPanel(
-                anchorX + savedOffsetX,
-                anchorY + savedOffsetY,
-                MODULE_WIDTH,
-                moduleHeight,
+                panelX + savedOffsetX,
+                panelY + savedOffsetY,
+                panelWidth,
+                panelHeight,
                 anchorX,
                 anchorY,
+                moduleHeight,
                 selectionKey);
         activeScreen = screen;
         activePanel = panel;
@@ -106,6 +115,24 @@ public final class PatternTerminalEvents {
         } catch (ReflectiveOperationException | RuntimeException ignored) {
         }
         return MODULE_HEIGHT;
+    }
+
+    private static int screenGuiLeft(Screen screen) {
+        try {
+            Object value = screen.getClass().getMethod("getGuiLeft").invoke(screen);
+            return value instanceof Number number ? number.intValue() : MODULE_GAP;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return MODULE_GAP;
+        }
+    }
+
+    private static int screenGuiTop(Screen screen) {
+        try {
+            Object value = screen.getClass().getMethod("getGuiTop").invoke(screen);
+            return value instanceof Number number ? number.intValue() : MODULE_GAP;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return MODULE_GAP;
+        }
     }
 
     @SubscribeEvent
@@ -202,6 +229,7 @@ public final class PatternTerminalEvents {
         private EntryKey selectedKey;
         private final int anchorX;
         private final int anchorY;
+        private final int expandedHeight;
         private int capturedButton = -1;
         private boolean dragging;
         private int dragOffsetX;
@@ -213,18 +241,20 @@ public final class PatternTerminalEvents {
         private final Map<String, ItemStack> iconCache = new HashMap<>();
 
         ToolPanel(int x, int y, int width, int height, int anchorX, int anchorY,
+                  int expandedHeight,
                   EntryKey selectionKey) {
             super(x, y, width, height, Component.translatable("patternchecker.menu.title"));
             this.anchorX = anchorX;
             this.anchorY = anchorY;
+            this.expandedHeight = expandedHeight;
             this.selectedKey = selectionKey;
             refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
             panelToggleButton = new PatternButton(
                     x + width - OUTER_PADDING - 74, y + 2, 74, BUTTON_HEIGHT,
-                    Component.empty(), button -> {
+                Component.empty(), button -> {
                 terminalPanelEnabled = !terminalPanelEnabled;
-                setButtonsVisible(terminalPanelEnabled);
+                setPanelExpanded(terminalPanelEnabled);
                 updatePanelToggleButton();
             });
 
@@ -476,10 +506,6 @@ public final class PatternTerminalEvents {
                 return;
             }
             if (!terminalPanelEnabled) {
-                gui.fill(getX(), getY(), getX() + getWidth(), getY() + 22, PANEL_COLOR);
-                gui.drawString(minecraft().font,
-                        Component.translatable("patternchecker.menu.panel.title"),
-                        getX() + 6, getY() + 6, TEXT_COLOR, false);
                 return;
             }
             if (selected < 0 && selectedKey != null) {
@@ -548,6 +574,8 @@ public final class PatternTerminalEvents {
             if (PatternCheckClient.getToolList().available()) {
                 updatePanelToggleButton();
                 panelToggleButton.render(gui, mouseX, mouseY, partialTick);
+                gui.renderItem(PatternCheckerMod.PATTERN_CHECKER_TOOL.get().getDefaultInstance(),
+                        panelToggleButton.getX() + 2, panelToggleButton.getY() + 2);
                 if (terminalPanelEnabled) {
                     for (PatternButton panelButton : buttons) {
                         panelButton.render(gui, mouseX, mouseY, partialTick);
@@ -572,10 +600,26 @@ public final class PatternTerminalEvents {
         }
 
         private void updatePanelToggleButton() {
-            panelToggleButton.setMessage(Component.translatable(terminalPanelEnabled
-                    ? "patternchecker.menu.panel.enabled"
-                    : "patternchecker.menu.panel.disabled"));
+            panelToggleButton.setMessage(Component.empty());
             panelToggleButton.visible = PatternCheckClient.getToolList().available();
+        }
+
+        private void setPanelExpanded(boolean expanded) {
+            if (expanded) {
+                setWidth(MODULE_WIDTH);
+                setHeight(expandedHeight);
+                setX(anchorX - (MODULE_WIDTH - COLLAPSED_SIZE) + savedOffsetX);
+                setY(anchorY + COLLAPSED_SIZE - expandedHeight + savedOffsetY);
+                setButtonsVisible(true);
+            } else {
+                setWidth(COLLAPSED_SIZE);
+                setHeight(COLLAPSED_SIZE);
+                setX(anchorX + savedOffsetX);
+                setY(anchorY + savedOffsetY);
+                setButtonsVisible(false);
+            }
+            clampToScreen();
+            moveButtons();
         }
 
         private void clampToScreen() {
