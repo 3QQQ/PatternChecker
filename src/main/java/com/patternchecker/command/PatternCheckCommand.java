@@ -4,6 +4,7 @@ import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.CommandDispatcher;
+import com.patternchecker.PatternCheckerMod;
 import com.patternchecker.action.PatternActions;
 import com.patternchecker.highlight.HighlightManager;
 import com.patternchecker.highlight.HighlightManager.ScanEntry;
@@ -277,6 +278,10 @@ public final class PatternCheckCommand {
         int storagePatterns = totalStoragePatterns;
         int errors = totalErrors;
         int warnings = totalWarnings;
+        PatternCheckerMod.LOGGER.info(
+                "Pattern scan complete for {}: total={}, providers={}, containers={}, storage={}, errors={}, warnings={}",
+                player.getGameProfile().getName(), patterns, providerPatterns,
+                containerPatterns, storagePatterns, errors, warnings);
         if (silent) {
             HighlightManager.setNotice(player.getUUID(),
                     Component.translatable("patternchecker.msg.scanDone", patterns, errors, warnings));
