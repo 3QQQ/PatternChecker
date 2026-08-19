@@ -63,7 +63,7 @@ public final class PatternTerminalEvents {
             return;
         }
         NetworkHandler.clearPendingToolList();
-        int moduleHeight = Math.min(MODULE_HEIGHT, screenHeight(screen));
+        int moduleHeight = Math.max(1, Math.min(MODULE_HEIGHT, screenHeight(screen)));
         int anchorX = screenGuiLeft(screen) - 2;
         int anchorY = screenGuiTop(screen) + 6 + COLLAPSED_SIZE + 2;
         int panelWidth = terminalPanelEnabled ? MODULE_WIDTH : COLLAPSED_SIZE;
@@ -104,7 +104,8 @@ public final class PatternTerminalEvents {
 
     private static int screenHeight(Screen screen) {
         if (screen instanceof PatternEncodingTermScreen<?> vanilla) {
-            return vanilla.getYSize();
+            int height = vanilla.getYSize();
+            return height > 0 ? height : MODULE_HEIGHT;
         }
         try {
             var method = screen.getClass().getMethod("getYSize");
@@ -572,12 +573,16 @@ public final class PatternTerminalEvents {
             renderWidget(gui, mouseX, mouseY, partialTick);
             if (PatternCheckClient.getToolList().available()) {
                 updatePanelToggleButton();
-                panelToggleButton.render(gui, mouseX, mouseY, partialTick);
-                gui.renderItem(PatternCheckerMod.PATTERN_CHECKER_TOOL.get().getDefaultInstance(),
-                        panelToggleButton.getX() + 2, panelToggleButton.getY() + 2);
+                if (hasRenderableSize(panelToggleButton)) {
+                    panelToggleButton.render(gui, mouseX, mouseY, partialTick);
+                    gui.renderItem(PatternCheckerMod.PATTERN_CHECKER_TOOL.get().getDefaultInstance(),
+                            panelToggleButton.getX() + 2, panelToggleButton.getY() + 2);
+                }
                 if (terminalPanelEnabled) {
                     for (PatternButton panelButton : buttons) {
-                        panelButton.render(gui, mouseX, mouseY, partialTick);
+                        if (hasRenderableSize(panelButton)) {
+                            panelButton.render(gui, mouseX, mouseY, partialTick);
+                        }
                     }
                 }
             }
@@ -585,6 +590,11 @@ public final class PatternTerminalEvents {
                 renderSelectedIssueTooltip(gui, mouseX, mouseY);
             }
             gui.pose().popPose();
+        }
+
+        private static boolean hasRenderableSize(AbstractWidget widget) {
+            return widget != null && widget.visible
+                    && widget.getWidth() > 0 && widget.getHeight() > 0;
         }
 
         private void setButtonsVisible(boolean visible) {
