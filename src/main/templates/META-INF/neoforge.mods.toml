@@ -42,8 +42,9 @@ displayName="${mod_name}" #mandatory
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-An Applied Energistics 2 addon that scans ME networks for broken or
-unfulfillable patterns and reports them in chat.
+Pattern Checker（样板检测工具）is an Applied Energistics 2 addon for supported
+Minecraft Forge and NeoForge versions. It scans ME networks for invalid,
+incompatible, unavailable, and duplicate patterns.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
