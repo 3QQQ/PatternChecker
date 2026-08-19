@@ -14,6 +14,7 @@
   "patternchecker.menu.duplicate.off": "重复检测：关",
   "patternchecker.menu.clear": "清除高亮",
   "patternchecker.menu.highlight": "高亮",
+  "patternchecker.menu.edit": "编辑",
   "patternchecker.menu.extract": "取出",
   "patternchecker.menu.upload": "上传",
   "patternchecker.menu.encode": "编码",

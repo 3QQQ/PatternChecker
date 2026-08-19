@@ -3,6 +3,7 @@ package com.patternchecker.highlight;
 import com.patternchecker.PatternCheckerMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -177,6 +178,20 @@ public final class HighlightManager {
             return;
         }
         long tick = event.getServer().getTickCount();
+        if (tick % PARTICLE_INTERVAL_TICKS == 0) {
+            for (var playerEntry : ACTIVE_HIGHLIGHTS.entrySet()) {
+                ServerPlayer player = event.getServer().getPlayerList().getPlayer(playerEntry.getKey());
+                if (player == null) {
+                    continue;
+                }
+                for (ActiveHighlight highlight : playerEntry.getValue()) {
+                    ServerLevel level = event.getServer().getLevel(highlight.dimension());
+                    if (level != null && level.hasChunkAt(highlight.pos())) {
+                        spawnHighlightParticles(level, player, highlight.pos());
+                    }
+                }
+            }
+        }
         boolean changed = false;
         for (var entry : ACTIVE_HIGHLIGHTS.entrySet()) {
             changed |= entry.getValue().removeIf(h -> tick >= h.expiryTick());
@@ -191,6 +206,28 @@ public final class HighlightManager {
             if (player != null) {
                 sendHighlights(player);
             }
+        }
+    }
+
+    private static void spawnHighlightParticles(
+            ServerLevel level, ServerPlayer player, BlockPos pos) {
+        double minX = pos.getX() + 0.05D;
+        double minY = pos.getY() + 0.05D;
+        double minZ = pos.getZ() + 0.05D;
+        double maxX = pos.getX() + 0.95D;
+        double maxY = pos.getY() + 0.95D;
+        double maxZ = pos.getZ() + 0.95D;
+        double[][] points = {
+                {minX, minY, minZ}, {maxX, minY, minZ},
+                {minX, maxY, minZ}, {maxX, maxY, minZ},
+                {minX, minY, maxZ}, {maxX, minY, maxZ},
+                {minX, maxY, maxZ}, {maxX, maxY, maxZ},
+                {pos.getX() + 0.5D, maxY + 0.12D, pos.getZ() + 0.5D}
+        };
+        for (double[] point : points) {
+            level.sendParticles(player, ParticleTypes.END_ROD, true,
+                    point[0], point[1], point[2], 1,
+                    0.0D, 0.0D, 0.0D, 0.0D);
         }
     }
 }

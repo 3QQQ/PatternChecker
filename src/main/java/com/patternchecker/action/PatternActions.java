@@ -36,6 +36,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.SimpleMenuProvider;
+import net.minecraft.world.SimpleContainer;
 import com.patternchecker.network.NetworkHandler;
 
 import java.lang.reflect.Method;
@@ -381,9 +382,75 @@ public final class PatternActions {
      * Opens the encoding terminal with the selected pattern pre-loaded.
      */
     public static void openEdit(ServerPlayer player, ToolEntry entry) {
-        HighlightManager.setNotice(player.getUUID(),
-                Component.translatable("patternchecker.encode.useTerminal"));
-        sendToolList(player);
+        Object host = findPatternHost(player, entry);
+        InternalInventory inventory = host == null ? null : PatternInventoryHelper.patternInventoryOf(host);
+        if (inventory == null || entry.slot() < 0 || entry.slot() >= inventory.size()) {
+            HighlightManager.setNotice(player.getUUID(),
+                    Component.translatable("patternchecker.action.badSlot"));
+            return;
+        }
+        ItemStack original = inventory.getStackInSlot(entry.slot());
+        if (original.isEmpty()) {
+            HighlightManager.setNotice(player.getUUID(),
+                    Component.translatable("patternchecker.action.badSlot"));
+            return;
+        }
+        IPatternDetails details;
+        try {
+            details = PatternDetailsHelper.decodePattern(original, player.serverLevel());
+        } catch (Exception e) {
+            HighlightManager.setNotice(player.getUUID(),
+                    Component.translatable("patternchecker.encode.failed"));
+            return;
+        }
+        if (!(details instanceof appeng.crafting.pattern.AEProcessingPattern)) {
+            HighlightManager.setNotice(player.getUUID(),
+                    Component.translatable("patternchecker.encode.unsupported"));
+            return;
+        }
+
+        SimpleContainer grid = new SimpleContainer(PatternEditMenu.GRID_SLOTS + 1);
+        int inputSlot = 0;
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            GenericStack[] possible = input.getPossibleInputs();
+            if (possible.length == 0 || possible[0] == null
+                    || !(possible[0].what() instanceof AEItemKey itemKey)) {
+                HighlightManager.setNotice(player.getUUID(),
+                        Component.translatable("patternchecker.encode.fluid"));
+                return;
+            }
+            if (inputSlot >= PatternEditMenu.INPUT_SLOTS) {
+                break;
+            }
+            ItemStack stack = itemKey.toStack();
+            stack.setCount((int) Math.max(1L,
+                    Math.min(999L, possible[0].amount() * input.getMultiplier())));
+            grid.setItem(inputSlot++, stack);
+        }
+        int outputSlot = PatternEditMenu.INPUT_SLOTS;
+        for (GenericStack output : details.getOutputs()) {
+            if (output == null || !(output.what() instanceof AEItemKey itemKey)) {
+                HighlightManager.setNotice(player.getUUID(),
+                        Component.translatable("patternchecker.encode.fluid"));
+                return;
+            }
+            if (outputSlot >= PatternEditMenu.INPUT_SLOTS + PatternEditMenu.OUTPUT_SLOTS) {
+                break;
+            }
+            ItemStack stack = itemKey.toStack();
+            stack.setCount((int) Math.max(1L, Math.min(999L, output.amount())));
+            grid.setItem(outputSlot++, stack);
+        }
+        for (ItemStack stack : player.getInventory().items) {
+            if (AEItems.BLANK_PATTERN.isSameAs(stack)) {
+                grid.setItem(PatternEditMenu.BLANK_SLOT, stack.split(1));
+                break;
+            }
+        }
+        player.openMenu(new SimpleMenuProvider(
+                (containerId, inventoryView, ignored) ->
+                        new PatternEditMenu(containerId, inventoryView, entry, grid),
+                Component.translatable("patternchecker.encode.title")));
     }
 
     /**
@@ -590,6 +657,7 @@ public final class PatternActions {
             if (!player.getInventory().add(blank)) {
                 player.drop(blank, false);
             }
+            menu.markCompleted();
         } catch (Exception e) {
             HighlightManager.setNotice(player.getUUID(),
                     Component.translatable("patternchecker.encode.failed"));

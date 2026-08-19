@@ -210,7 +210,7 @@ public final class PatternTerminalEvents {
         private static final int LIST_SIDE = 5;
         private static final int LIST_BOTTOM_RESERVED = 58;
         private static final int ROW_HEIGHT = 22;
-        private static final int ACTION_BUTTONS = 4;
+        private static final int ACTION_BUTTONS = 5;
         private static final int TOOLTIP_WIDTH = 240;
         private static final float OVERLAY_Z = 500.0F;
 
@@ -219,6 +219,7 @@ public final class PatternTerminalEvents {
         private final PatternButton inputButton;
         private final PatternButton duplicateButton;
         private final PatternButton highlightButton;
+        private final PatternButton editButton;
         private final PatternButton extractButton;
         private final PatternButton uploadButton;
         private final PatternButton writeButton;
@@ -287,15 +288,17 @@ public final class PatternTerminalEvents {
             int remainder = available % ACTION_BUTTONS;
             highlightButton = actionButton(0, actionY, actionWidth, remainder,
                     "patternchecker.menu.highlight", PatternToolActionPayload.ACTION_HIGHLIGHT);
-            extractButton = actionButton(1, actionY, actionWidth, remainder,
+            editButton = actionButton(1, actionY, actionWidth, remainder,
+                    "patternchecker.menu.edit", PatternToolActionPayload.ACTION_EDIT);
+            extractButton = actionButton(2, actionY, actionWidth, remainder,
                     "patternchecker.menu.extract", PatternToolActionPayload.ACTION_EXTRACT);
-            uploadButton = actionButton(2, actionY, actionWidth, remainder,
+            uploadButton = actionButton(3, actionY, actionWidth, remainder,
                     "patternchecker.menu.upload", PatternToolActionPayload.ACTION_UPLOAD);
-            writeButton = actionButton(3, actionY, actionWidth, remainder,
+            writeButton = actionButton(4, actionY, actionWidth, remainder,
                     "patternchecker.menu.write", PatternToolActionPayload.ACTION_WRITE);
             buttons = new PatternButton[]{
                     scanButton, unbindButton, inputButton, duplicateButton,
-                    highlightButton, extractButton, uploadButton, writeButton
+                    highlightButton, editButton, extractButton, uploadButton, writeButton
             };
             moveButtons();
         }
@@ -664,6 +667,7 @@ public final class PatternTerminalEvents {
             inputButton.visible = visible;
             duplicateButton.visible = visible;
             highlightButton.visible = visible;
+            editButton.visible = visible;
             extractButton.visible = visible;
             uploadButton.visible = visible;
             writeButton.visible = visible;
@@ -762,6 +766,7 @@ public final class PatternTerminalEvents {
                             : "patternchecker.menu.duplicate.off"));
             boolean canAct = hasSelectedProvider();
             highlightButton.active = canAct;
+            editButton.active = canAct;
             extractButton.active = canAct;
             uploadButton.active = canAct;
             writeButton.active = canAct;

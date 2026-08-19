@@ -28,6 +28,7 @@ public class PatternCheckMenu extends AbstractContainerMenu {
     public static final int BUTTON_HIGHLIGHT = 10000;
     public static final int BUTTON_EXTRACT = 20000;
     public static final int BUTTON_UPLOAD = 30000;
+    public static final int BUTTON_EDIT = 40000;
 
     public PatternCheckMenu(int containerId, Inventory playerInventory) {
         super(PatternCheckerMod.PATTERN_CHECK_MENU.get(), containerId);
@@ -62,6 +63,7 @@ public class PatternCheckMenu extends AbstractContainerMenu {
                         case 1 -> PatternActions.highlight(serverPlayer, entry);
                         case 2 -> PatternActions.extract(serverPlayer, entry);
                         case 3 -> PatternActions.upload(serverPlayer, entry);
+                        case 4 -> PatternActions.openEdit(serverPlayer, entry);
                         default -> {
                         }
                     }

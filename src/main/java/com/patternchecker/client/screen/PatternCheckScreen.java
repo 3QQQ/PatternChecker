@@ -56,7 +56,7 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
     private static final int LIST_SIDE = 5;
     private static final int LIST_BOTTOM_RESERVED = 58;
     private static final int ROW_HEIGHT = 22;
-    private static final int ACTION_BUTTONS = 3;
+    private static final int ACTION_BUTTONS = 4;
     private static final int TOOLTIP_WIDTH = 240;
 
     private PatternButton scanButton;
@@ -66,6 +66,7 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
     private PatternButton highlightButton;
     private PatternButton extractButton;
     private PatternButton uploadButton;
+    private PatternButton editButton;
 
     private int scroll;
     private int selected = -1;
@@ -109,9 +110,11 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         int remainder = available % ACTION_BUTTONS;
         highlightButton = actionButton(0, actionY, actionWidth, remainder,
                 "patternchecker.menu.highlight", PatternCheckMenu.BUTTON_HIGHLIGHT);
-        extractButton = actionButton(1, actionY, actionWidth, remainder,
+        editButton = actionButton(1, actionY, actionWidth, remainder,
+                "patternchecker.menu.edit", PatternCheckMenu.BUTTON_EDIT);
+        extractButton = actionButton(2, actionY, actionWidth, remainder,
                 "patternchecker.menu.extract", PatternCheckMenu.BUTTON_EXTRACT);
-        uploadButton = actionButton(2, actionY, actionWidth, remainder,
+        uploadButton = actionButton(3, actionY, actionWidth, remainder,
                 "patternchecker.menu.upload", PatternCheckMenu.BUTTON_UPLOAD);
     }
 
@@ -219,6 +222,7 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         ToolListPayload.Entry entry = selectedEntry();
         boolean canAct = entry != null && entry.hasProvider();
         highlightButton.active = canAct;
+        editButton.active = canAct;
         extractButton.active = canAct;
         uploadButton.active = canAct;
         scanButton.active = payload.bound();
