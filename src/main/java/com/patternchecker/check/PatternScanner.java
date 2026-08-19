@@ -1241,8 +1241,7 @@ public final class PatternScanner {
                     aliases("getOutput", "output"));
             case "expatternprovider" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getOutput", "output"));
-            case "gtceu" -> recipeOutputsFromMembers(recipe, registryAccess,
-                    aliases("outputs", "getOutputs"));
+            case "gtceu" -> gtceuRecipeOutputs(recipe, registryAccess);
             case "ae2lt" -> ae2LtRecipeOutputs(recipe, registryAccess);
             case "data_energistics" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getResult", "result"), aliases("getResults", "results"),
@@ -1457,7 +1456,7 @@ public final class PatternScanner {
         // Ender IO OutputStack variants, and similar optional integrations).
         for (String member : new String[]{
                 "getItemStack", "itemStack", "getStack", "stack", "getItem", "item",
-                "getItems", "items",
+                "getItems", "items", "getStacks", "stacks",
                 "getMainOutput", "mainOutput", "getMaxSecondaryOutput", "maxSecondaryOutput",
                 "getSecondaryOutput", "secondaryOutput", "getFluid", "fluid", "getFluids",
                 "fluids", "getChemical", "chemical", "resolve", "left", "right"
@@ -1592,8 +1591,7 @@ public final class PatternScanner {
                     aliases("getIngredient", "ingredient"),
                     aliases("getFluidInput", "fluidInput", "inputFluid"),
                     aliases("getCatalyst", "catalyst"));
-            case "gtceu" -> recipeRequirementsFromMembers(recipe,
-                    aliases("inputs", "getInputs"));
+            case "gtceu" -> gtceuRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1724,6 +1722,128 @@ public final class PatternScanner {
         return requirements;
     }
 
+    /**
+     * GTCEu stores recipe IO in capability-keyed maps instead of vanilla
+     * ingredients/results. The map values are Content wrappers whose payload
+     * is an Ingredient, SizedIngredient, FluidIngredient, or a fluid stack.
+     * Keep this adapter isolated to the gtceu namespace so the capability
+     * layout cannot affect unrelated recipe implementations.
+     */
+    private static List<RecipeRequirement> gtceuRecipeRequirements(Recipe<?> recipe) {
+        Object rawInputs = readMember(recipe, "inputs");
+        if (!(rawInputs instanceof Map<?, ?> inputMap)) {
+            return genericRecipeRequirements(recipe);
+        }
+
+        List<RecipeRequirement> requirements = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : inputMap.entrySet()) {
+            if (!isGtceuItemOrFluidCapability(entry.getKey())) {
+                continue;
+            }
+            addGtceuRequirements(requirements, entry.getValue());
+        }
+        return requirements.isEmpty() ? genericRecipeRequirements(recipe) : requirements;
+    }
+
+    private static void addGtceuRequirements(
+            List<RecipeRequirement> requirements, Object values) {
+        if (values instanceof Iterable<?> iterable) {
+            for (Object value : iterable) {
+                addGtceuRequirements(requirements, value);
+            }
+            return;
+        }
+        if (values != null && values.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(values);
+            for (int i = 0; i < length; i++) {
+                addGtceuRequirements(requirements, java.lang.reflect.Array.get(values, i));
+            }
+            return;
+        }
+        Object payload = readMember(values, "getContent");
+        if (payload == null) {
+            payload = readMember(values, "content");
+        }
+        if (payload != null && payload != values) {
+            RecipeRequirement requirement = sizedIngredientFrom(payload);
+            if (requirement != null) {
+                requirements.add(requirement);
+            }
+            return;
+        }
+        RecipeRequirement requirement = sizedIngredientFrom(values);
+        if (requirement != null) {
+            requirements.add(requirement);
+        }
+    }
+
+    private static List<RecipeOutput> gtceuRecipeOutputs(
+            Recipe<?> recipe, net.minecraft.core.RegistryAccess registryAccess) {
+        Object rawOutputs = readMember(recipe, "outputs");
+        if (!(rawOutputs instanceof Map<?, ?> outputMap)) {
+            return genericRecipeOutputs(recipe, registryAccess);
+        }
+
+        List<RecipeOutput> outputs = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : outputMap.entrySet()) {
+            if (!isGtceuItemOrFluidCapability(entry.getKey())) {
+                continue;
+            }
+            addGtceuOutputs(outputs, entry.getValue());
+        }
+        return outputs.isEmpty() ? genericRecipeOutputs(recipe, registryAccess) : outputs;
+    }
+
+    private static void addGtceuOutputs(List<RecipeOutput> outputs, Object values) {
+        if (values instanceof Iterable<?> iterable) {
+            for (Object value : iterable) {
+                addGtceuOutputs(outputs, value);
+            }
+            return;
+        }
+        if (values != null && values.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(values);
+            for (int i = 0; i < length; i++) {
+                addGtceuOutputs(outputs, java.lang.reflect.Array.get(values, i));
+            }
+            return;
+        }
+        Object payload = readMember(values, "getContent");
+        if (payload == null) {
+            payload = readMember(values, "content");
+        }
+        if (payload == null || payload == values) {
+            payload = values;
+        }
+
+        long amount = Math.max(1L, numericAmount(payload, numericAmount(values, 1L)));
+        if (payload instanceof Ingredient ingredient) {
+            for (ItemStack stack : ingredient.getItems()) {
+                if (!stack.isEmpty()) {
+                    addUniqueRecipeOutput(outputs,
+                            BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                            amount * Math.max(1L, stack.getCount()));
+                }
+            }
+            return;
+        }
+        if (payload instanceof ItemStack stack && !stack.isEmpty()) {
+            addUniqueRecipeOutput(outputs,
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                    amount * Math.max(1L, stack.getCount()));
+            return;
+        }
+        addRecipeOutput(outputs, payload);
+    }
+
+    private static boolean isGtceuItemOrFluidCapability(Object capability) {
+        if (capability == null) {
+            return false;
+        }
+        Object name = readMember(capability, "name");
+        return "item".equals(name) || "fluid".equals(name);
+    }
+
     private static List<RecipeRequirement> genericRecipeRequirements(Recipe<?> recipe) {
         List<RecipeRequirement> requirements = new ArrayList<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
@@ -1792,10 +1912,16 @@ public final class PatternScanner {
         long amount = numericAmount(input, 1L);
         Object ingredient = invokeNoArg(input, "getIngredient", "ingredient");
         if (ingredient == null) {
+            ingredient = invokeNoArg(input, "getInner", "inner");
+        }
+        if (ingredient == null) {
             ingredient = input;
         } else {
             amount = numericAmount(ingredient, amount);
             Object nested = invokeNoArg(ingredient, "getIngredient", "ingredient");
+            if (nested == null) {
+                nested = invokeNoArg(ingredient, "getInner", "inner");
+            }
             if (nested != null && nested != ingredient) {
                 ingredient = nested;
             }
@@ -2897,6 +3023,24 @@ public final class PatternScanner {
         if (path.equals("electric_blast_furnace")) {
             return List.of("gtceu:blast");
         }
+        if (path.equals("large_chemical_reactor")) {
+            return List.of("gtceu:large_chemical_reactor");
+        }
+        if (path.equals("vacuum_freezer")) {
+            return List.of("gtceu:vacuum_freezer");
+        }
+        if (path.equals("pyrolyse_oven")) {
+            return List.of("gtceu:pyrolyse_oven");
+        }
+        if (path.equals("implosion_compressor")) {
+            return List.of("gtceu:implosion_compressor");
+        }
+        if (path.equals("assembly_line")) {
+            return List.of("gtceu:assembly_line");
+        }
+        if (path.equals("fusion_reactor")) {
+            return List.of("gtceu:fusion_reactor");
+        }
         if (path.equals("primitive_blast_furnace")) {
             return List.of("gtceu:primitive_blast_furnace");
         }
@@ -2917,8 +3061,23 @@ public final class PatternScanner {
         if (normalized.endsWith("_alloy_smelter")) {
             return List.of("gtceu:alloy_smelter");
         }
+        if (normalized.endsWith("_arc_furnace")) {
+            return List.of("gtceu:arc_furnace");
+        }
+        if (normalized.endsWith("_autoclave")) {
+            return List.of("gtceu:autoclave");
+        }
         if (normalized.endsWith("_assembler")) {
             return List.of("gtceu:assembler");
+        }
+        if (normalized.endsWith("_bender")) {
+            return List.of("gtceu:bender");
+        }
+        if (normalized.endsWith("_brewery")) {
+            return List.of("gtceu:brewery");
+        }
+        if (normalized.endsWith("_canner")) {
+            return List.of("gtceu:canner");
         }
         if (normalized.endsWith("_centrifuge")) {
             return List.of("gtceu:centrifuge");
@@ -2944,8 +3103,23 @@ public final class PatternScanner {
         if (normalized.endsWith("_electrolyzer")) {
             return List.of("gtceu:electrolyzer");
         }
+        if (normalized.endsWith("_electromagnetic_separator")) {
+            return List.of("gtceu:electromagnetic_separator");
+        }
         if (normalized.endsWith("_extractor")) {
             return List.of("gtceu:extractor");
+        }
+        if (normalized.endsWith("_extruder")) {
+            return List.of("gtceu:extruder");
+        }
+        if (normalized.endsWith("_fermenter")) {
+            return List.of("gtceu:fermenter");
+        }
+        if (normalized.endsWith("_fluid_heater")) {
+            return List.of("gtceu:fluid_heater");
+        }
+        if (normalized.endsWith("_fluid_solidifier")) {
+            return List.of("gtceu:fluid_solidification");
         }
         if (normalized.endsWith("_forge_hammer")) {
             return List.of("gtceu:forge_hammer");
@@ -2953,11 +3127,32 @@ public final class PatternScanner {
         if (normalized.endsWith("_forming_press")) {
             return List.of("gtceu:forming_press");
         }
+        if (normalized.endsWith("_gas_collector")) {
+            return List.of("gtceu:gas_collector");
+        }
+        if (normalized.endsWith("_air_scrubber")) {
+            return List.of("gtceu:air_scrubber");
+        }
         if (normalized.endsWith("_mixer")) {
             return List.of("gtceu:mixer");
         }
+        if (normalized.endsWith("_macerator")) {
+            return List.of("gtceu:macerator");
+        }
+        if (normalized.endsWith("_lathe")) {
+            return List.of("gtceu:lathe");
+        }
+        if (normalized.endsWith("_laser_engraver")) {
+            return List.of("gtceu:laser_engraver");
+        }
         if (normalized.endsWith("_ore_washer")) {
             return List.of("gtceu:ore_washer");
+        }
+        if (normalized.endsWith("_packer")) {
+            return List.of("gtceu:packer");
+        }
+        if (normalized.endsWith("_polarizer")) {
+            return List.of("gtceu:polarizer");
         }
         if (normalized.endsWith("_rock_crusher")) {
             return List.of("gtceu:rock_breaker");
@@ -2965,8 +3160,20 @@ public final class PatternScanner {
         if (normalized.endsWith("_sifter")) {
             return List.of("gtceu:sifter");
         }
+        if (normalized.endsWith("_research_station")) {
+            return List.of("gtceu:research_station");
+        }
+        if (normalized.endsWith("_scanner")) {
+            return List.of("gtceu:scanner");
+        }
         if (normalized.endsWith("_thermal_centrifuge")) {
             return List.of("gtceu:thermal_centrifuge");
+        }
+        if (normalized.endsWith("_wiremill")) {
+            return List.of("gtceu:wiremill");
+        }
+        if (normalized.equals("electric_furnace")) {
+            return List.of("gtceu:electric_furnace");
         }
         return List.of();
     }
