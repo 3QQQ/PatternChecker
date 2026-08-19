@@ -449,8 +449,7 @@ public final class PatternTerminalEvents {
             setY((int) mouseY - dragOffsetY);
             clampToScreen();
             moveButtons();
-            savedOffsetX = getX() - anchorX;
-            savedOffsetY = getY() - anchorY;
+            saveOffsetFromPosition();
             return true;
         }
 
@@ -620,6 +619,24 @@ public final class PatternTerminalEvents {
             }
             clampToScreen();
             moveButtons();
+            saveOffsetFromPosition();
+        }
+
+        /**
+         * Persist the dragged position in the coordinate system of the
+         * collapsed icon anchor. Expanded and collapsed panels have different
+         * top-left origins, so saving getX()-anchorX directly makes the next
+         * terminal screen recreate the panel at the wrong position.
+         */
+        private void saveOffsetFromPosition() {
+            int baseX = terminalPanelEnabled
+                    ? anchorX - (MODULE_WIDTH - COLLAPSED_SIZE)
+                    : anchorX;
+            int baseY = terminalPanelEnabled
+                    ? anchorY + COLLAPSED_SIZE - expandedHeight
+                    : anchorY;
+            savedOffsetX = getX() - baseX;
+            savedOffsetY = getY() - baseY;
         }
 
         private void clampToScreen() {
