@@ -1,0 +1,69 @@
+name: Publish Minecraft release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - minecraft: "1.20.1"
+            loader: forge
+            java: "17"
+            ref: codex/mc-1.20.1
+          - minecraft: "1.21.1"
+            loader: neoforge
+            java: "21"
+            ref: main
+
+    steps:
+      - name: Checkout version branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release JAR
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean build
+
+      - name: Publish to GitHub Release and CurseForge
+        uses: Kira-NT/mc-publish@v3
+        with:
+          files: build/libs/*.jar
+          name: Pattern Checker ${{ matrix.minecraft }} ${{ matrix.loader }}
+          version: ${{ github.ref_name }}
+          version-type: release
+          changelog-file: CHANGELOG.md
+          loaders: ${{ matrix.loader }}
+          game-versions: ${{ matrix.minecraft }}
+          environment: client | server
+          curseforge-id: "1653507"
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-tag: ${{ github.ref_name }}
+          github-draft: false
+          github-prerelease: false
+          retry-attempts: 3
+          retry-delay: 10000

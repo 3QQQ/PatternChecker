@@ -42,3 +42,10 @@ Build with:
 ```
 
 The built mod JAR is written to `build/libs/`.
+
+## Automated publishing
+
+Pushing a semantic `v*` tag runs the GitHub Actions `mc-publish` workflow.
+It builds both supported branches and publishes the Minecraft 1.20.1 Forge and
+1.21.1 NeoForge JARs to the GitHub Release and CurseForge project `1653507`.
+The repository must define the `CURSEFORGE_TOKEN` Actions secret.
