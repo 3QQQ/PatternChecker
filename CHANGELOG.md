@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.3 - 2026-08-20
+
+### Added
+
+- Added direct editing for item-only processing patterns, including duplicate
+  patterns, from both checker interfaces.
+- Added container names and coordinates to pattern list entries.
+- Added mouse dragging for the checker list scrollbar.
+
+### Changed
+
+- Preserved the floating checker position across terminal sessions and
+  expanded/collapsed states.
+- Kept the checker toggle compact and pinned to the module's top-right corner.
+
+### Fixed
+
+- Fixed terminal checker rendering with invalid or transient widget sizes.
+- Fixed position resets when reopening a pattern terminal.
+- Fixed edge-position expansion crashes caused by invalid button dimensions.
+
 ## 1.0.2 - 2026-08-18
 
 ### Added
