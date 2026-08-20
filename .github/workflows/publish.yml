@@ -12,58 +12,61 @@ jobs:
   publish:
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - minecraft: "1.20.1"
-            loader: forge
-            java: "17"
-            ref: codex/mc-1.20.1
-          - minecraft: "1.21.1"
-            loader: neoforge
-            java: "21"
-            ref: main
 
     steps:
-      - name: Checkout version branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ matrix.ref }}
-          fetch-depth: 0
+      - name: Checkout release assets
+        uses: actions/checkout@v5
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ matrix.java }}
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build release JAR
-        shell: bash
-        run: |
-          chmod +x ./gradlew
-          ./gradlew clean build
-
-      - name: Publish to GitHub Release and CurseForge
+      - name: Publish GitHub Release
         uses: Kira-NT/mc-publish@v3
         with:
-          files: build/libs/*.jar
-          name: Pattern Checker ${{ matrix.minecraft }} ${{ matrix.loader }}
+          files: release-assets/*.jar
+          name: Pattern Checker ${{ github.ref_name }}
           version: ${{ github.ref_name }}
           version-type: release
           changelog-file: CHANGELOG.md
-          loaders: ${{ matrix.loader }}
-          game-versions: ${{ matrix.minecraft }}
+          loaders: |
+            forge
+            neoforge
+          game-versions: |
+            1.20.1
+            1.21.1
           environment: client | server
-          curseforge-id: "1653507"
-          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           github-tag: ${{ github.ref_name }}
           github-draft: false
           github-prerelease: false
+          retry-attempts: 3
+          retry-delay: 10000
+
+      - name: Publish Minecraft 1.20.1 Forge to CurseForge
+        uses: Kira-NT/mc-publish@v3
+        with:
+          files: release-assets/patternchecker-mc1.20.1-*.jar
+          name: Pattern Checker 1.0.3 for Minecraft 1.20.1 Forge
+          version: 1.0.3+mc1.20.1
+          version-type: release
+          changelog-file: CHANGELOG.md
+          loaders: forge
+          game-versions: 1.20.1
+          environment: client | server
+          curseforge-id: "1653507"
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          retry-attempts: 3
+          retry-delay: 10000
+
+      - name: Publish Minecraft 1.21.1 NeoForge to CurseForge
+        uses: Kira-NT/mc-publish@v3
+        with:
+          files: release-assets/patternchecker-mc1.21.1-*.jar
+          name: Pattern Checker 1.0.3 for Minecraft 1.21.1 NeoForge
+          version: 1.0.3+mc1.21.1
+          version-type: release
+          changelog-file: CHANGELOG.md
+          loaders: neoforge
+          game-versions: 1.21.1
+          environment: client | server
+          curseforge-id: "1653507"
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           retry-attempts: 3
           retry-delay: 10000
