@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.3 - 2026-08-20
+
+### Added
+
+- Added precise compatibility for the GregTech Leisure 1.20.1 modpack,
+  including GTCEu 1.4.4 recipe IO and GTL pattern buffers.
+- Added discovery for GTL ME Craft Pattern Containers that do not implement
+  AE2's standard pattern-container interface.
+- Added direct editing for item-only processing patterns, including duplicate
+  patterns, from both checker interfaces.
+- Added container names and coordinates to pattern list entries.
+- Added mouse dragging for the checker list scrollbar.
+- Added a player-targeted particle fallback for provider highlighting.
+
+### Changed
+
+- Cached machine recipe indexes across scans to avoid repeatedly parsing tens
+  of thousands of recipes.
+- Deferred tool opening and manual rescans to keep the interface responsive.
+- Improved GTCEu recipe parsing and isolated malformed optional recipes so one
+  recipe cannot stop a full network scan.
+- Preserved the floating checker position across terminal sessions and
+  expanded/collapsed states.
+
+### Fixed
+
+- Fixed incomplete scans caused by GTCEu recipe-wrapper recursion.
+- Fixed missing GTL custom pattern containers.
+- Fixed terminal checker crashes near screen edges and with custom UI resource
+  packs.
+- Fixed Forge highlight rendering compatibility.
+
 ## 1.0.2 - 2026-08-18
 
 ### Added
