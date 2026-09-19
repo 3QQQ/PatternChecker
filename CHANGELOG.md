@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4 - 2026-09-19
+
+### Added
+
+- Drag the collapsed checker icon to reposition it and retain its position.
+  Click and release without dragging to expand the panel.
+
+### Fixed
+
+- Fixed collapsed checker mouse capture preventing inventory items from being
+  placed back into slots.
+- Fixed narrow or invisible buttons after reopening a terminal with the checker
+  collapsed and then expanding it.
+- Fixed mouse capture cleanup when toggling the checker panel.
+- Fixed the Edit button not following panel layout changes.
+
 ## 1.0.3 - 2026-08-20
 
 ### Added
