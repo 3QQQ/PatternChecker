@@ -47,5 +47,7 @@ The built mod JAR is written to `build/libs/`.
 
 Pushing a semantic `v*` tag runs the GitHub Actions `mc-publish` workflow.
 It publishes the locally verified Minecraft 1.20.1 Forge and 1.21.1 NeoForge
-JARs from `release-assets/` to the GitHub Release and CurseForge project
+JARs from `release-assets/<version>/` to the GitHub Release and CurseForge project
 `1653507`. The repository must define the `CURSEFORGE_TOKEN` Actions secret.
+Each version directory must contain both Minecraft targets, `RELEASE-NOTES.md`,
+and `SHA256SUMS.txt`. The workflow validates the bundle before publishing.

@@ -234,6 +234,10 @@ public final class PatternTerminalEvents {
         private final int expandedHeight;
         private int capturedButton = -1;
         private boolean dragging;
+        private boolean collapsedPress;
+        private double pressX;
+        private double pressY;
+        private static final double DRAG_THRESHOLD_SQUARED = 9.0;
         private boolean scrollbarDragging;
         private int scrollbarDragOffset;
         private int dragOffsetX;
@@ -262,14 +266,14 @@ public final class PatternTerminalEvents {
                         updatePanelToggleButton();
                     });
 
-            int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
+            int splitWidth = (MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
             scanButton = new AE2Button(
                     x + OUTER_PADDING, y + TOP_BUTTON_Y, splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.scan"),
                     button -> sendAction(PatternToolActionPayload.ACTION_SCAN, -1));
             unbindButton = new AE2Button(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOP_BUTTON_Y,
-                    width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
+                    MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.unbind"),
                     button -> sendAction(PatternToolActionPayload.ACTION_UNBIND, -1));
             inputButton = new AE2Button(
@@ -278,12 +282,12 @@ public final class PatternTerminalEvents {
                     button -> sendAction(PatternToolActionPayload.ACTION_TOGGLE_INPUT, -1));
             duplicateButton = new AE2Button(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOGGLE_BUTTON_Y,
-                    width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
+                    MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.empty(),
                     button -> sendAction(PatternToolActionPayload.ACTION_TOGGLE_DUPLICATE, -1));
 
             int actionY = actionButtonY();
-            int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
+            int available = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int actionWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
             highlightButton = actionButton(0, actionY, actionWidth, remainder,
@@ -361,7 +365,18 @@ public final class PatternTerminalEvents {
                 return false;
             }
             if (!terminalPanelEnabled) {
-                return button == 0 && panelToggleButton.mouseClicked(mouseX, mouseY, button);
+                if (button != 0) {
+                    return false;
+                }
+                // Defer expansion until release so a drag can move the icon.
+                capturedButton = button;
+                collapsedPress = true;
+                dragging = false;
+                pressX = mouseX;
+                pressY = mouseY;
+                dragOffsetX = (int) mouseX - getX();
+                dragOffsetY = (int) mouseY - getY();
+                return true;
             }
             capturedButton = button;
             if (button != 0) {
@@ -408,11 +423,12 @@ public final class PatternTerminalEvents {
         @Override
         public boolean mouseDragged(double mouseX, double mouseY, int button,
                                     double dragX, double dragY) {
-            if (!terminalPanelEnabled) {
-                return false;
-            }
             if (capturedButton != button) {
                 return false;
+            }
+            if (collapsedPress) {
+                dragCollapsedIcon(mouseX, mouseY, button);
+                return true;
             }
             if (scrollbarDragging) {
                 updateScrollFromMouse(mouseY);
@@ -426,12 +442,25 @@ public final class PatternTerminalEvents {
 
         @Override
         public boolean mouseReleased(double mouseX, double mouseY, int button) {
-            if (!terminalPanelEnabled) {
-                return panelToggleButton.mouseReleased(mouseX, mouseY, button);
-            }
+            // Button.mouseReleased accepts every left-button release, even
+            // outside its bounds. Only forward releases whose press we consumed,
+            // including the release after the toggle changes the panel layout.
             if (capturedButton != button) {
                 return false;
             }
+            if (collapsedPress) {
+                dragCollapsedIcon(mouseX, mouseY, button);
+                boolean expand = !dragging && isInside(mouseX, mouseY);
+                collapsedPress = false;
+                capturedButton = -1;
+                endDragging(button);
+                if (expand) {
+                    panelToggleButton.mouseClicked(mouseX, mouseY, button);
+                    panelToggleButton.mouseReleased(mouseX, mouseY, button);
+                }
+                return true;
+            }
+            panelToggleButton.mouseReleased(mouseX, mouseY, button);
             if (scrollbarDragging) {
                 scrollbarDragging = false;
                 capturedButton = -1;
@@ -445,6 +474,17 @@ public final class PatternTerminalEvents {
                 endDragging(button);
             }
             return true;
+        }
+
+        private void dragCollapsedIcon(double mouseX, double mouseY, int button) {
+            double dx = mouseX - pressX;
+            double dy = mouseY - pressY;
+            if (!dragging && dx * dx + dy * dy >= DRAG_THRESHOLD_SQUARED) {
+                dragging = true;
+            }
+            if (dragging) {
+                continueDragging(mouseX, mouseY, button);
+            }
         }
 
         private boolean beginDragging(double mouseX, double mouseY, int button) {
@@ -725,7 +765,14 @@ public final class PatternTerminalEvents {
             int x = getX();
             int y = getY();
             int width = getWidth();
-            int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
+            // Content buttons belong to the expanded panel, even when the
+            // screen is constructed with only the collapsed icon visible.
+            int splitWidth = (MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
+            int rightWidth = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth;
+            scanButton.setWidth(splitWidth);
+            unbindButton.setWidth(rightWidth);
+            inputButton.setWidth(splitWidth);
+            duplicateButton.setWidth(rightWidth);
             scanButton.setX(x + OUTER_PADDING);
             scanButton.setY(y + TOP_BUTTON_Y);
             unbindButton.setX(x + OUTER_PADDING + splitWidth + BUTTON_GAP);
@@ -742,12 +789,13 @@ public final class PatternTerminalEvents {
             panelToggleButton.setX(x + width - COLLAPSED_SIZE);
             panelToggleButton.setY(y);
 
-            int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
+            int available = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
             AE2Button[] actions = {highlightButton, editButton, extractButton, uploadButton, writeButton};
             for (int i = 0; i < actions.length; i++) {
                 int widthBefore = i * baseWidth + Math.min(i, remainder);
+                actions[i].setWidth(baseWidth + (i < remainder ? 1 : 0));
                 actions[i].setX(x + OUTER_PADDING + i * BUTTON_GAP + widthBefore);
                 actions[i].setY(actionButtonY());
             }

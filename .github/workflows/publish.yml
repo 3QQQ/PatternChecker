@@ -17,14 +17,27 @@ jobs:
       - name: Checkout release assets
         uses: actions/checkout@v5
 
+      - name: Validate release bundle
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cd "release-assets/$version"
+          test -f "patternchecker-mc1.20.1-$version.jar"
+          test -f "patternchecker-mc1.21.1-$version.jar"
+          test -f RELEASE-NOTES.md
+          sha256sum --check SHA256SUMS.txt
+
       - name: Publish GitHub Release
         uses: Kira-NT/mc-publish@v3
         with:
-          files: release-assets/*.jar
+          files: release-assets/${{ steps.release.outputs.version }}/*.jar
           name: Pattern Checker ${{ github.ref_name }}
           version: ${{ github.ref_name }}
           version-type: release
-          changelog-file: CHANGELOG.md
+          changelog-file: release-assets/${{ steps.release.outputs.version }}/RELEASE-NOTES.md
           loaders: |
             forge
             neoforge
@@ -42,11 +55,11 @@ jobs:
       - name: Publish Minecraft 1.20.1 Forge to CurseForge
         uses: Kira-NT/mc-publish@v3
         with:
-          files: release-assets/patternchecker-mc1.20.1-*.jar
-          name: Pattern Checker 1.0.3 for Minecraft 1.20.1 Forge
-          version: 1.0.3+mc1.20.1
+          files: release-assets/${{ steps.release.outputs.version }}/patternchecker-mc1.20.1-${{ steps.release.outputs.version }}.jar
+          name: Pattern Checker ${{ steps.release.outputs.version }} for Minecraft 1.20.1 Forge
+          version: ${{ steps.release.outputs.version }}+mc1.20.1
           version-type: release
-          changelog-file: CHANGELOG.md
+          changelog-file: release-assets/${{ steps.release.outputs.version }}/RELEASE-NOTES.md
           loaders: forge
           game-versions: 1.20.1
           environment: client | server
@@ -58,11 +71,11 @@ jobs:
       - name: Publish Minecraft 1.21.1 NeoForge to CurseForge
         uses: Kira-NT/mc-publish@v3
         with:
-          files: release-assets/patternchecker-mc1.21.1-*.jar
-          name: Pattern Checker 1.0.3 for Minecraft 1.21.1 NeoForge
-          version: 1.0.3+mc1.21.1
+          files: release-assets/${{ steps.release.outputs.version }}/patternchecker-mc1.21.1-${{ steps.release.outputs.version }}.jar
+          name: Pattern Checker ${{ steps.release.outputs.version }} for Minecraft 1.21.1 NeoForge
+          version: ${{ steps.release.outputs.version }}+mc1.21.1
           version-type: release
-          changelog-file: CHANGELOG.md
+          changelog-file: release-assets/${{ steps.release.outputs.version }}/RELEASE-NOTES.md
           loaders: neoforge
           game-versions: 1.21.1
           environment: client | server

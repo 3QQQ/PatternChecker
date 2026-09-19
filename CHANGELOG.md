@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.4 - 2026-09-19
+
+Minecraft 1.20.1 / Forge and Minecraft 1.21.1 / NeoForge.
+
+### Added
+
+- The collapsed checker icon can now be dragged to reposition it. A click
+  expands the panel on release; dragging preserves the collapsed state and
+  saves the new position.
+
+### Fixed
+
+- Fixed the collapsed checker consuming inventory mouse-release events,
+  preventing picked-up items from being placed back into slots.
+- Fixed narrow or invisible action buttons after reopening a terminal with
+  the checker collapsed and then expanding it.
+- Fixed mouse capture cleanup when switching between expanded and collapsed
+  states.
+- Fixed the Minecraft 1.20.1 Edit button not following panel layout changes.
+
 ## 1.0.3 - 2026-08-20
 
 ### Added
