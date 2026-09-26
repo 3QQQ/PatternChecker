@@ -18,8 +18,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.RenderTooltipEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -43,12 +45,19 @@ public final class PatternTerminalEvents {
     private static final int COLLAPSED_SIZE = 20;
     private static int savedOffsetX;
     private static int savedOffsetY;
+    private static int savedCollapsedX = -1;
+    private static int savedCollapsedY = -1;
     private static Screen activeScreen;
     private static ToolPanel activePanel;
     private static EntryKey persistedSelectionKey;
+    private static ViewportState persistedViewport = new ViewportState(null, 0);
     private static boolean terminalPanelEnabled = true;
+    private static boolean renderingPanelOverlay;
 
     private record EntryKey(String location, int slot) {
+    }
+
+    private record ViewportState(EntryKey topEntry, int fallbackRow) {
     }
 
     private PatternTerminalEvents() {
@@ -63,27 +72,25 @@ public final class PatternTerminalEvents {
             return;
         }
         NetworkHandler.clearPendingToolList();
+        // Do not reuse the previous terminal session's availability while the
+        // server is determining whether this screen has access to a checker.
+        PatternCheckClient.resetToolList();
         int moduleHeight = Math.max(1, Math.min(MODULE_HEIGHT, screenHeight(screen)));
         int anchorX = screenGuiLeft(screen) - 2;
         int anchorY = screenGuiTop(screen) + 6 + COLLAPSED_SIZE + 2;
-        int panelWidth = terminalPanelEnabled ? MODULE_WIDTH : COLLAPSED_SIZE;
-        int panelHeight = terminalPanelEnabled ? moduleHeight : COLLAPSED_SIZE;
-        int panelX = terminalPanelEnabled
-                ? anchorX - (MODULE_WIDTH - COLLAPSED_SIZE)
-                : anchorX;
-        int panelY = terminalPanelEnabled
-                ? anchorY + COLLAPSED_SIZE - moduleHeight
-                : anchorY;
+        int panelX = anchorX - (MODULE_WIDTH - COLLAPSED_SIZE) + savedOffsetX;
+        int panelY = anchorY + COLLAPSED_SIZE - moduleHeight + savedOffsetY;
         EntryKey selectionKey = activePanel != null ? activePanel.selectedKey : persistedSelectionKey;
         ToolPanel panel = new ToolPanel(
-                panelX + savedOffsetX,
-                panelY + savedOffsetY,
-                panelWidth,
-                panelHeight,
+                panelX,
+                panelY,
+                MODULE_WIDTH,
+                moduleHeight,
                 anchorX,
                 anchorY,
                 moduleHeight,
-                selectionKey);
+                selectionKey,
+                persistedViewport);
         activeScreen = screen;
         activePanel = panel;
     }
@@ -172,11 +179,26 @@ public final class PatternTerminalEvents {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onScreenRender(ScreenEvent.Render.Post event) {
         if (event.getScreen() == activeScreen && activePanel != null) {
-            activePanel.renderOverlay(
-                    event.getGuiGraphics(), event.getMouseX(), event.getMouseY(), event.getPartialTick());
+            renderingPanelOverlay = true;
+            try {
+                activePanel.renderOverlay(
+                        event.getGuiGraphics(), event.getMouseX(), event.getMouseY(), event.getPartialTick());
+            } finally {
+                renderingPanelOverlay = false;
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRenderTooltip(RenderTooltipEvent.Pre event) {
+        if (!renderingPanelOverlay
+                && Minecraft.getInstance().screen == activeScreen
+                && activePanel != null
+                && activePanel.blocksUnderlyingHover(event.getX(), event.getY())) {
+            event.setCanceled(true);
         }
     }
 
@@ -212,6 +234,7 @@ public final class PatternTerminalEvents {
         private static final int ROW_HEIGHT = 22;
         private static final int ACTION_BUTTONS = 5;
         private static final int TOOLTIP_WIDTH = 240;
+        private static final double TOGGLE_DRAG_THRESHOLD_SQUARED = 9.0D;
         private static final float OVERLAY_Z = 500.0F;
 
         private final AE2Button scanButton;
@@ -233,47 +256,55 @@ public final class PatternTerminalEvents {
         private final int anchorY;
         private final int expandedHeight;
         private int capturedButton = -1;
+        private boolean toggleCaptured;
+        private boolean toggleDragged;
+        private boolean toggleStartedExpanded;
+        private double togglePressX;
+        private double togglePressY;
+        private int toggleStartX;
+        private int toggleStartY;
+        private int collapsedButtonX;
+        private int collapsedButtonY;
         private boolean dragging;
-        private boolean collapsedPress;
-        private double pressX;
-        private double pressY;
-        private static final double DRAG_THRESHOLD_SQUARED = 9.0;
         private boolean scrollbarDragging;
         private int scrollbarDragOffset;
         private int dragOffsetX;
         private int dragOffsetY;
         private int syncDelayFrames = 12;
         private boolean syncRequested;
+        private boolean restoreViewportOnNextSync = true;
+        private final ViewportState viewportToRestore;
         private List<ToolListPayload.Entry> cachedEntries = List.of();
         private Map<Integer, ToolListPayload.Entry> entriesByIndex = Map.of();
         private final Map<String, ItemStack> iconCache = new HashMap<>();
 
         ToolPanel(int x, int y, int width, int height, int anchorX, int anchorY,
                   int expandedHeight,
-                  EntryKey selectionKey) {
+                  EntryKey selectionKey, ViewportState viewportToRestore) {
             super(x, y, width, height, Component.translatable("patternchecker.menu.title"));
             this.anchorX = anchorX;
             this.anchorY = anchorY;
             this.expandedHeight = expandedHeight;
             this.selectedKey = selectionKey;
+            this.viewportToRestore = viewportToRestore;
             refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
+            collapsedButtonX = savedCollapsedX >= 0 ? savedCollapsedX : getX();
+            collapsedButtonY = savedCollapsedY >= 0 ? savedCollapsedY : getY();
+            clampCollapsedButtonToScreen();
             panelToggleButton = new AE2Button(
                     x + width - COLLAPSED_SIZE, y, COLLAPSED_SIZE, COLLAPSED_SIZE,
                     Component.empty(), button -> {
-                        terminalPanelEnabled = !terminalPanelEnabled;
-                        setPanelExpanded(terminalPanelEnabled);
-                        updatePanelToggleButton();
                     });
 
-            int splitWidth = (MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
+            int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
             scanButton = new AE2Button(
                     x + OUTER_PADDING, y + TOP_BUTTON_Y, splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.scan"),
                     button -> sendAction(PatternToolActionPayload.ACTION_SCAN, -1));
             unbindButton = new AE2Button(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOP_BUTTON_Y,
-                    MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
+                    width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.translatable("patternchecker.menu.unbind"),
                     button -> sendAction(PatternToolActionPayload.ACTION_UNBIND, -1));
             inputButton = new AE2Button(
@@ -282,12 +313,12 @@ public final class PatternTerminalEvents {
                     button -> sendAction(PatternToolActionPayload.ACTION_TOGGLE_INPUT, -1));
             duplicateButton = new AE2Button(
                     x + OUTER_PADDING + splitWidth + BUTTON_GAP, y + TOGGLE_BUTTON_Y,
-                    MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
+                    width - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth, BUTTON_HEIGHT,
                     Component.empty(),
                     button -> sendAction(PatternToolActionPayload.ACTION_TOGGLE_DUPLICATE, -1));
 
             int actionY = actionButtonY();
-            int available = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
+            int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int actionWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
             highlightButton = actionButton(0, actionY, actionWidth, remainder,
@@ -355,34 +386,37 @@ public final class PatternTerminalEvents {
         }
 
         private boolean isInside(double mouseX, double mouseY) {
+            if (!terminalPanelEnabled) {
+                return mouseX >= panelToggleButton.getX()
+                        && mouseX < panelToggleButton.getX() + panelToggleButton.getWidth()
+                        && mouseY >= panelToggleButton.getY()
+                        && mouseY < panelToggleButton.getY() + panelToggleButton.getHeight();
+            }
             return mouseX >= getX() && mouseX < getX() + getWidth()
                     && mouseY >= getY() && mouseY < getY() + getHeight();
         }
 
+        private boolean isAvailable() {
+            return PatternCheckClient.getToolList().available();
+        }
+
+        private boolean blocksUnderlyingHover(double mouseX, double mouseY) {
+            return isAvailable() && isInside(mouseX, mouseY);
+        }
+
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            if (!PatternCheckClient.getToolList().available() || !isInside(mouseX, mouseY)) {
+            if (!isAvailable() || !isInside(mouseX, mouseY)) {
                 return false;
             }
             if (!terminalPanelEnabled) {
-                if (button != 0) {
-                    return false;
-                }
-                // Defer expansion until release so a drag can move the icon.
-                capturedButton = button;
-                collapsedPress = true;
-                dragging = false;
-                pressX = mouseX;
-                pressY = mouseY;
-                dragOffsetX = (int) mouseX - getX();
-                dragOffsetY = (int) mouseY - getY();
-                return true;
+                return captureToggleClick(mouseX, mouseY, button);
             }
             capturedButton = button;
             if (button != 0) {
                 return true;
             }
-            if (panelToggleButton.mouseClicked(mouseX, mouseY, button)) {
+            if (captureToggleClick(mouseX, mouseY, button)) {
                 return true;
             }
             if (beginDragging(mouseX, mouseY, button)) {
@@ -423,12 +457,33 @@ public final class PatternTerminalEvents {
         @Override
         public boolean mouseDragged(double mouseX, double mouseY, int button,
                                     double dragX, double dragY) {
-            if (capturedButton != button) {
+            if (toggleCaptured && capturedButton == button) {
+                double offsetX = mouseX - togglePressX;
+                double offsetY = mouseY - togglePressY;
+                if (!toggleDragged
+                        && offsetX * offsetX + offsetY * offsetY >= TOGGLE_DRAG_THRESHOLD_SQUARED) {
+                    toggleDragged = true;
+                }
+                if (toggleDragged) {
+                    if (toggleStartedExpanded) {
+                        setX(toggleStartX + (int) Math.round(offsetX));
+                        setY(toggleStartY + (int) Math.round(offsetY));
+                        clampToScreen();
+                        saveOffsetFromPosition();
+                    } else {
+                        collapsedButtonX = toggleStartX + (int) Math.round(offsetX);
+                        collapsedButtonY = toggleStartY + (int) Math.round(offsetY);
+                        clampCollapsedButtonToScreen();
+                    }
+                    moveButtons();
+                }
+                return true;
+            }
+            if (!terminalPanelEnabled) {
                 return false;
             }
-            if (collapsedPress) {
-                dragCollapsedIcon(mouseX, mouseY, button);
-                return true;
+            if (capturedButton != button) {
+                return false;
             }
             if (scrollbarDragging) {
                 updateScrollFromMouse(mouseY);
@@ -442,25 +497,26 @@ public final class PatternTerminalEvents {
 
         @Override
         public boolean mouseReleased(double mouseX, double mouseY, int button) {
-            // Button.mouseReleased accepts every left-button release, even
-            // outside its bounds. Only forward releases whose press we consumed,
-            // including the release after the toggle changes the panel layout.
             if (capturedButton != button) {
                 return false;
             }
-            if (collapsedPress) {
-                dragCollapsedIcon(mouseX, mouseY, button);
-                boolean expand = !dragging && isInside(mouseX, mouseY);
-                collapsedPress = false;
+            if (toggleCaptured) {
+                panelToggleButton.mouseReleased(mouseX, mouseY, button);
+                boolean togglePanel = !toggleDragged;
+                toggleCaptured = false;
+                toggleDragged = false;
                 capturedButton = -1;
-                endDragging(button);
-                if (expand) {
-                    panelToggleButton.mouseClicked(mouseX, mouseY, button);
-                    panelToggleButton.mouseReleased(mouseX, mouseY, button);
+                if (togglePanel) {
+                    terminalPanelEnabled = !terminalPanelEnabled;
+                    setPanelExpanded(terminalPanelEnabled);
+                    updatePanelToggleButton();
                 }
                 return true;
             }
-            panelToggleButton.mouseReleased(mouseX, mouseY, button);
+            if (!terminalPanelEnabled) {
+                capturedButton = -1;
+                return false;
+            }
             if (scrollbarDragging) {
                 scrollbarDragging = false;
                 capturedButton = -1;
@@ -476,19 +532,28 @@ public final class PatternTerminalEvents {
             return true;
         }
 
-        private void dragCollapsedIcon(double mouseX, double mouseY, int button) {
-            double dx = mouseX - pressX;
-            double dy = mouseY - pressY;
-            if (!dragging && dx * dx + dy * dy >= DRAG_THRESHOLD_SQUARED) {
-                dragging = true;
+        /**
+         * Starts an input capture only when the press actually hits the panel
+         * toggle. In particular, a collapsed panel must not consume releases
+         * belonging to buttons on the underlying terminal screen.
+         */
+        private boolean captureToggleClick(double mouseX, double mouseY, int button) {
+            if (button != 0 || !panelToggleButton.mouseClicked(mouseX, mouseY, button)) {
+                return false;
             }
-            if (dragging) {
-                continueDragging(mouseX, mouseY, button);
-            }
+            capturedButton = button;
+            toggleCaptured = true;
+            toggleDragged = false;
+            togglePressX = mouseX;
+            togglePressY = mouseY;
+            toggleStartedExpanded = terminalPanelEnabled;
+            toggleStartX = toggleStartedExpanded ? getX() : collapsedButtonX;
+            toggleStartY = toggleStartedExpanded ? getY() : collapsedButtonY;
+            return true;
         }
 
         private boolean beginDragging(double mouseX, double mouseY, int button) {
-            if (!PatternCheckClient.getToolList().available() || button != 0
+            if (!isAvailable() || button != 0
                     || mouseX < getX() || mouseX >= getX() + getWidth()
                     || mouseY < getY() || mouseY >= getY() + HEADER_HEIGHT) {
                 return false;
@@ -553,6 +618,7 @@ public final class PatternTerminalEvents {
             int maxScroll = Math.max(0, entryCount - visible);
             if (maxScroll == 0) {
                 scroll = 0;
+                saveViewport();
                 return;
             }
             int trackTop = getY() + LIST_TOP + 2;
@@ -564,11 +630,12 @@ public final class PatternTerminalEvents {
                     Math.min(trackTop + travel, (int) mouseY - scrollbarDragOffset));
             scroll = Math.max(0, Math.min(maxScroll,
                     Math.round((thumbY - trackTop) * maxScroll / (float) travel)));
+            saveViewport();
         }
 
         @Override
         public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-            if (!PatternCheckClient.getToolList().available() || !isInside(mouseX, mouseY)) {
+            if (!isAvailable() || !isInside(mouseX, mouseY)) {
                 return false;
             }
             if (!terminalPanelEnabled) {
@@ -577,6 +644,7 @@ public final class PatternTerminalEvents {
             int maxScroll = Math.max(0, entries().size() - visibleRows());
             int direction = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
             scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
+            saveViewport();
             return true;
         }
 
@@ -594,26 +662,19 @@ public final class PatternTerminalEvents {
             if (polled != null) {
                 PatternCheckClient.setToolList(polled);
                 refreshEntries(polled);
-                selected = findMatchingEntry(polled.entries(), selectedKey);
-                if (selected < 0) {
-                    selectedKey = null;
-                    persistedSelectionKey = null;
-                }
-                scroll = 0;
+                restoreSelectionAndViewport(restoreViewportOnNextSync);
+                restoreViewportOnNextSync = false;
             }
             ToolListPayload payload = PatternCheckClient.getToolList();
             if (cachedEntries.isEmpty() && !payload.entries().isEmpty()) {
                 refreshEntries(payload);
             }
-            setButtonsVisible(payload.available());
+            setButtonsVisible(payload.available() && terminalPanelEnabled);
             if (!payload.available()) {
                 return;
             }
             if (!terminalPanelEnabled) {
                 return;
-            }
-            if (selected < 0 && selectedKey != null) {
-                selected = findMatchingEntry(payload.entries(), selectedKey);
             }
             updateButtons(payload);
 
@@ -658,24 +719,65 @@ public final class PatternTerminalEvents {
             return new EntryKey(entry.location(), entry.slot());
         }
 
-        private static int findMatchingEntry(
+        private static int findMatchingRow(
                 List<ToolListPayload.Entry> entries, EntryKey key) {
             if (key == null) {
                 return -1;
             }
-            for (ToolListPayload.Entry entry : entries) {
+            for (int row = 0; row < entries.size(); row++) {
+                ToolListPayload.Entry entry = entries.get(row);
                 if (entry.location().equals(key.location()) && entry.slot() == key.slot()) {
-                    return entry.index();
+                    return row;
                 }
             }
             return -1;
+        }
+
+        private void restoreSelectionAndViewport(boolean restoreViewport) {
+            int row = findMatchingRow(cachedEntries, selectedKey);
+            if (row < 0) {
+                selected = -1;
+                selectedKey = null;
+                persistedSelectionKey = null;
+                restoreViewport(restoreViewport ? viewportToRestore : persistedViewport);
+            } else {
+                selected = cachedEntries.get(row).index();
+            }
+            if (row >= 0 && restoreViewport) {
+                int visible = visibleRows();
+                if (row < scroll) {
+                    scroll = row;
+                } else if (row >= scroll + visible) {
+                    scroll = row - visible + 1;
+                }
+            }
+            clampScroll();
+            saveViewport();
+        }
+
+        private void restoreViewport(ViewportState viewport) {
+            int anchorRow = findMatchingRow(cachedEntries, viewport.topEntry());
+            scroll = anchorRow >= 0 ? anchorRow : viewport.fallbackRow();
+            clampScroll();
+        }
+
+        private void clampScroll() {
+            int maxScroll = Math.max(0, cachedEntries.size() - visibleRows());
+            scroll = Math.max(0, Math.min(maxScroll, scroll));
+        }
+
+        private void saveViewport() {
+            EntryKey topEntry = scroll >= 0 && scroll < cachedEntries.size()
+                    ? keyOf(cachedEntries.get(scroll))
+                    : null;
+            persistedViewport = new ViewportState(topEntry, scroll);
         }
 
         private void renderOverlay(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
             gui.pose().pushPose();
             gui.pose().translate(0.0F, 0.0F, OVERLAY_Z);
             renderWidget(gui, mouseX, mouseY, partialTick);
-            if (PatternCheckClient.getToolList().available()) {
+            if (isAvailable()) {
                 updatePanelToggleButton();
                 if (hasRenderableSize(panelToggleButton)) {
                     panelToggleButton.render(gui, mouseX, mouseY, partialTick);
@@ -715,41 +817,22 @@ public final class PatternTerminalEvents {
 
         private void updatePanelToggleButton() {
             panelToggleButton.setMessage(Component.empty());
-            panelToggleButton.visible = PatternCheckClient.getToolList().available();
+            panelToggleButton.visible = isAvailable();
         }
 
         private void setPanelExpanded(boolean expanded) {
-            if (expanded) {
-                setWidth(MODULE_WIDTH);
-                setHeight(expandedHeight);
-                setX(anchorX - (MODULE_WIDTH - COLLAPSED_SIZE) + savedOffsetX);
-                setY(anchorY + COLLAPSED_SIZE - expandedHeight + savedOffsetY);
-                setButtonsVisible(true);
-            } else {
-                setWidth(COLLAPSED_SIZE);
-                setHeight(COLLAPSED_SIZE);
-                setX(anchorX + savedOffsetX);
-                setY(anchorY + savedOffsetY);
-                setButtonsVisible(false);
-            }
-            clampToScreen();
+            setButtonsVisible(expanded && isAvailable());
             moveButtons();
-            saveOffsetFromPosition();
         }
 
         /**
-         * Persist the dragged position in the coordinate system of the
-         * collapsed icon anchor. Expanded and collapsed panels have different
-         * top-left origins, so saving getX()-anchorX directly makes the next
-         * terminal screen recreate the panel at the wrong position.
+         * Persist the expanded panel's dragged position. Collapsing only hides
+         * its contents; the panel geometry remains stable to avoid layout and
+         * input-state glitches while the toggle button is handling a click.
          */
         private void saveOffsetFromPosition() {
-            int baseX = terminalPanelEnabled
-                    ? anchorX - (MODULE_WIDTH - COLLAPSED_SIZE)
-                    : anchorX;
-            int baseY = terminalPanelEnabled
-                    ? anchorY + COLLAPSED_SIZE - expandedHeight
-                    : anchorY;
+            int baseX = anchorX - (MODULE_WIDTH - COLLAPSED_SIZE);
+            int baseY = anchorY + COLLAPSED_SIZE - expandedHeight;
             savedOffsetX = getX() - baseX;
             savedOffsetY = getY() - baseY;
         }
@@ -761,18 +844,22 @@ public final class PatternTerminalEvents {
             setY(Math.max(0, Math.min(screenHeight - getHeight(), getY())));
         }
 
+        private void clampCollapsedButtonToScreen() {
+            int screenWidth = minecraft().getWindow().getGuiScaledWidth();
+            int screenHeight = minecraft().getWindow().getGuiScaledHeight();
+            collapsedButtonX = Math.max(0,
+                    Math.min(screenWidth - COLLAPSED_SIZE, collapsedButtonX));
+            collapsedButtonY = Math.max(0,
+                    Math.min(screenHeight - COLLAPSED_SIZE, collapsedButtonY));
+            savedCollapsedX = collapsedButtonX;
+            savedCollapsedY = collapsedButtonY;
+        }
+
         private void moveButtons() {
             int x = getX();
             int y = getY();
             int width = getWidth();
-            // Content buttons belong to the expanded panel, even when the
-            // screen is constructed with only the collapsed icon visible.
-            int splitWidth = (MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
-            int rightWidth = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP - splitWidth;
-            scanButton.setWidth(splitWidth);
-            unbindButton.setWidth(rightWidth);
-            inputButton.setWidth(splitWidth);
-            duplicateButton.setWidth(rightWidth);
+            int splitWidth = (width - OUTER_PADDING * 2 - BUTTON_GAP) / 2;
             scanButton.setX(x + OUTER_PADDING);
             scanButton.setY(y + TOP_BUTTON_Y);
             unbindButton.setX(x + OUTER_PADDING + splitWidth + BUTTON_GAP);
@@ -781,21 +868,20 @@ public final class PatternTerminalEvents {
             inputButton.setY(y + TOGGLE_BUTTON_Y);
             duplicateButton.setX(x + OUTER_PADDING + splitWidth + BUTTON_GAP);
             duplicateButton.setY(y + TOGGLE_BUTTON_Y);
-            // Keep the icon button exactly the same size as the collapsed
-            // module and pin it to the module's top-right corner. In the
-            // collapsed state this resolves to the whole 20x20 widget,
-            // while in the expanded state it becomes the module's header
-            // toggle without covering the title.
-            panelToggleButton.setX(x + width - COLLAPSED_SIZE);
-            panelToggleButton.setY(y);
+            // The expanded toggle sits in the header. When collapsed it moves
+            // independently within the full screen and does not inherit the
+            // expanded panel's much larger drag bounds.
+            panelToggleButton.setX(terminalPanelEnabled
+                    ? x + width - COLLAPSED_SIZE
+                    : collapsedButtonX);
+            panelToggleButton.setY(terminalPanelEnabled ? y : collapsedButtonY);
 
-            int available = MODULE_WIDTH - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
+            int available = width - OUTER_PADDING * 2 - BUTTON_GAP * (ACTION_BUTTONS - 1);
             int baseWidth = available / ACTION_BUTTONS;
             int remainder = available % ACTION_BUTTONS;
             AE2Button[] actions = {highlightButton, editButton, extractButton, uploadButton, writeButton};
             for (int i = 0; i < actions.length; i++) {
                 int widthBefore = i * baseWidth + Math.min(i, remainder);
-                actions[i].setWidth(baseWidth + (i < remainder ? 1 : 0));
                 actions[i].setX(x + OUTER_PADDING + i * BUTTON_GAP + widthBefore);
                 actions[i].setY(actionButtonY());
             }
