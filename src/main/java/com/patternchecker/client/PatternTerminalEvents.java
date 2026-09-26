@@ -46,9 +46,13 @@ public final class PatternTerminalEvents {
     private static Screen activeScreen;
     private static ToolPanel activePanel;
     private static EntryKey persistedSelectionKey;
+    private static ViewportState persistedViewport = new ViewportState(null, 0);
     private static boolean terminalPanelEnabled = true;
 
     private record EntryKey(String location, int slot) {
+    }
+
+    private record ViewportState(EntryKey topEntry, int fallbackRow) {
     }
 
     private PatternTerminalEvents() {
@@ -83,7 +87,8 @@ public final class PatternTerminalEvents {
                 anchorX,
                 anchorY,
                 moduleHeight,
-                selectionKey);
+                selectionKey,
+                persistedViewport);
         activeScreen = screen;
         activePanel = panel;
     }
@@ -244,18 +249,21 @@ public final class PatternTerminalEvents {
         private int dragOffsetY;
         private int syncDelayFrames = 12;
         private boolean syncRequested;
+        private boolean restoreViewportOnNextSync = true;
+        private final ViewportState viewportToRestore;
         private List<ToolListPayload.Entry> cachedEntries = List.of();
         private Map<Integer, ToolListPayload.Entry> entriesByIndex = Map.of();
         private final Map<String, ItemStack> iconCache = new HashMap<>();
 
         ToolPanel(int x, int y, int width, int height, int anchorX, int anchorY,
                   int expandedHeight,
-                  EntryKey selectionKey) {
+                  EntryKey selectionKey, ViewportState viewportToRestore) {
             super(x, y, width, height, Component.translatable("patternchecker.menu.title"));
             this.anchorX = anchorX;
             this.anchorY = anchorY;
             this.expandedHeight = expandedHeight;
             this.selectedKey = selectionKey;
+            this.viewportToRestore = viewportToRestore;
             refreshEntries(PatternCheckClient.getToolList());
             clampToScreen();
             panelToggleButton = new AE2Button(
@@ -553,6 +561,7 @@ public final class PatternTerminalEvents {
             int maxScroll = Math.max(0, entryCount - visible);
             if (maxScroll == 0) {
                 scroll = 0;
+                saveViewport();
                 return;
             }
             int trackTop = getY() + LIST_TOP + 2;
@@ -564,6 +573,7 @@ public final class PatternTerminalEvents {
                     Math.min(trackTop + travel, (int) mouseY - scrollbarDragOffset));
             scroll = Math.max(0, Math.min(maxScroll,
                     Math.round((thumbY - trackTop) * maxScroll / (float) travel)));
+            saveViewport();
         }
 
         @Override
@@ -577,6 +587,7 @@ public final class PatternTerminalEvents {
             int maxScroll = Math.max(0, entries().size() - visibleRows());
             int direction = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
             scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
+            saveViewport();
             return true;
         }
 
@@ -594,12 +605,8 @@ public final class PatternTerminalEvents {
             if (polled != null) {
                 PatternCheckClient.setToolList(polled);
                 refreshEntries(polled);
-                selected = findMatchingEntry(polled.entries(), selectedKey);
-                if (selected < 0) {
-                    selectedKey = null;
-                    persistedSelectionKey = null;
-                }
-                scroll = 0;
+                restoreSelectionAndViewport(restoreViewportOnNextSync);
+                restoreViewportOnNextSync = false;
             }
             ToolListPayload payload = PatternCheckClient.getToolList();
             if (cachedEntries.isEmpty() && !payload.entries().isEmpty()) {
@@ -611,9 +618,6 @@ public final class PatternTerminalEvents {
             }
             if (!terminalPanelEnabled) {
                 return;
-            }
-            if (selected < 0 && selectedKey != null) {
-                selected = findMatchingEntry(payload.entries(), selectedKey);
             }
             updateButtons(payload);
 
@@ -658,17 +662,58 @@ public final class PatternTerminalEvents {
             return new EntryKey(entry.location(), entry.slot());
         }
 
-        private static int findMatchingEntry(
+        private static int findMatchingRow(
                 List<ToolListPayload.Entry> entries, EntryKey key) {
             if (key == null) {
                 return -1;
             }
-            for (ToolListPayload.Entry entry : entries) {
+            for (int row = 0; row < entries.size(); row++) {
+                ToolListPayload.Entry entry = entries.get(row);
                 if (entry.location().equals(key.location()) && entry.slot() == key.slot()) {
-                    return entry.index();
+                    return row;
                 }
             }
             return -1;
+        }
+
+        private void restoreSelectionAndViewport(boolean restoreViewport) {
+            int row = findMatchingRow(cachedEntries, selectedKey);
+            if (row < 0) {
+                selected = -1;
+                selectedKey = null;
+                persistedSelectionKey = null;
+                restoreViewport(restoreViewport ? viewportToRestore : persistedViewport);
+            } else {
+                selected = cachedEntries.get(row).index();
+            }
+            if (row >= 0 && restoreViewport) {
+                int visible = visibleRows();
+                if (row < scroll) {
+                    scroll = row;
+                } else if (row >= scroll + visible) {
+                    scroll = row - visible + 1;
+                }
+            }
+            clampScroll();
+            saveViewport();
+        }
+
+        private void restoreViewport(ViewportState viewport) {
+            int anchorRow = findMatchingRow(cachedEntries, viewport.topEntry());
+            scroll = anchorRow >= 0 ? anchorRow : viewport.fallbackRow();
+            clampScroll();
+        }
+
+        private void clampScroll() {
+            int maxScroll = Math.max(0, cachedEntries.size() - visibleRows());
+            scroll = Math.max(0, Math.min(maxScroll, scroll));
+        }
+
+        private void saveViewport() {
+            EntryKey topEntry = scroll >= 0 && scroll < cachedEntries.size()
+                    ? keyOf(cachedEntries.get(scroll))
+                    : null;
+            persistedViewport = new ViewportState(topEntry, scroll);
         }
 
         private void renderOverlay(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
