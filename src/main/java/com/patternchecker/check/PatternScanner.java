@@ -104,6 +104,11 @@ public final class PatternScanner {
             "immersiveengineering:refinery",
             "immersiveengineering:sawmill",
             "immersiveengineering:squeezer");
+    private static final List<String> MALUM_DISTRIBUTED_RECIPE_TYPES = List.of(
+            "malum:spirit_infusion",
+            "malum:spirit_focusing",
+            "malum:runeworking",
+            "malum:void_favor");
 
     @FunctionalInterface
     private interface MemberAccessor {
@@ -1422,6 +1427,7 @@ public final class PatternScanner {
                     aliases("getRitualDummy"));
             case "immersiveengineering" ->
                     immersiveEngineeringRecipeOutputs(recipe, registryAccess);
+            case "malum" -> malumRecipeOutputs(recipe, registryAccess);
             case "ifeu" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("output", "getOutput"));
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1522,6 +1528,28 @@ public final class PatternScanner {
             }
         }
         return outputs;
+    }
+
+    private static List<RecipeOutput> malumRecipeOutputs(
+            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "malum:spirit_infusion" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("result"));
+            case "malum:spirit_focusing" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("getOutputRaw", "createOutput", "output"));
+            case "malum:runeworking" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("output"));
+            case "malum:void_favor" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("result"));
+            case "malum:conjuncture_crystallarium" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("getFurnaceResults"), aliases("getResultFallback"));
+            default -> List.of();
+        };
     }
 
     private static List<RecipeOutput> recipeOutputsFromMembers(
@@ -1784,6 +1812,7 @@ public final class PatternScanner {
             case "mysticalagriculture" -> mysticalAgricultureRecipeRequirements(recipe);
             case "ars_nouveau" -> arsNouveauRecipeRequirements(recipe);
             case "immersiveengineering" -> immersiveEngineeringRecipeRequirements(recipe);
+            case "malum" -> malumRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1914,6 +1943,25 @@ public final class PatternScanner {
                     recipeRequirementsFromMembers(recipe,
                             aliases("getItemInputs"), aliases("getFluidInputs"));
             default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    private static List<RecipeRequirement> malumRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "malum:spirit_infusion" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input"), aliases("extraInputs"), aliases("spirits"));
+            case "malum:spirit_focusing" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getInput", "input"), aliases("getSpirits", "spirits"));
+            case "malum:runeworking" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input"), aliases("secondaryInput"));
+            case "malum:void_favor" ->
+                    recipeRequirementsFromMembers(recipe, aliases("input"));
+            case "malum:conjuncture_crystallarium" ->
+                    recipeRequirementsFromMembers(recipe, aliases("getInput"));
+            default -> List.of();
         };
     }
 
@@ -2542,6 +2590,13 @@ public final class PatternScanner {
                 return true;
             }
         }
+        for (String identifier : MALUM_DISTRIBUTED_RECIPE_TYPES) {
+            RecipeType<?> type = recipeType(identifier);
+            if (type != null
+                    && hasMatchingMachineRecipe(level, details, type, null, context)) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -2958,7 +3013,8 @@ public final class PatternScanner {
                 || namespace.equals("occultism")
                 || namespace.equals("mysticalagriculture")
                 || namespace.equals("ars_nouveau")
-                || namespace.equals("immersiveengineering");
+                || namespace.equals("immersiveengineering")
+                || namespace.equals("malum");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -3278,6 +3334,16 @@ public final class PatternScanner {
                     List.of("ars_nouveau:enchanting_apparatus");
             case "ars_nouveau:imbuement_chamber" ->
                     List.of("ars_nouveau:imbuement");
+            case "malum:spirit_altar" ->
+                    List.of("malum:spirit_infusion");
+            case "malum:spirit_crucible" ->
+                    List.of("malum:spirit_focusing");
+            case "malum:runic_workbench" ->
+                    List.of("malum:runeworking");
+            case "malum:weeping_well_centerpiece" ->
+                    List.of("malum:void_favor");
+            case "malum:conjuncture_crystallarium" ->
+                    List.of("malum:conjuncture_crystallarium");
             default -> List.of();
         };
     }
