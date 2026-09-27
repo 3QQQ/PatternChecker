@@ -244,6 +244,7 @@ public final class PatternScanner {
     }
 
     public record ScanResult(int totalPatterns, int providerPatterns, int containerPatterns, int storagePatterns,
+                             int virtualCraftingPatterns,
                              List<Component> verdicts, List<ScannedPattern> patterns, List<PatternIssue> issues) {
         public int errorCount() {
             return (int) issues.stream().filter(i -> i.type() == PatternIssue.Type.ERROR).count();
@@ -265,7 +266,7 @@ public final class PatternScanner {
         List<DuplicateCandidate> duplicateCandidates = new ArrayList<>();
         List<InputIssueCandidate> inputIssueCandidates = new ArrayList<>();
         Set<AEKey> scannedCraftingOutputs = new HashSet<>();
-        int[] totals = new int[3]; // total, provider, container
+        int[] totals = new int[4]; // total, provider, container, virtual crafting
         int storagePatterns = 0;
 
         // Canonical AE2 API: every pattern-holding grid machine implements
@@ -305,7 +306,8 @@ public final class PatternScanner {
 
         removeCraftableInputIssues(inputIssueCandidates, scannedCraftingOutputs, issues, level);
         markDuplicatePatterns(duplicateCandidates, issues);
-        return new ScanResult(totals[0], totals[1], totals[2], storagePatterns, verdicts, patterns, issues);
+        return new ScanResult(totals[0], totals[1], totals[2], storagePatterns, totals[3],
+                verdicts, patterns, issues);
     }
 
     /**
@@ -330,7 +332,8 @@ public final class PatternScanner {
                 duplicateCandidates, inputIssueCandidates, scannedCraftingOutputs, totals, scanContext);
         removeCraftableInputIssues(inputIssueCandidates, scannedCraftingOutputs, issues, level);
         markDuplicatePatterns(duplicateCandidates, issues);
-        return new ScanResult(totals[0], totals[1], totals[2], 0, verdicts, patterns, issues);
+        return new ScanResult(totals[0], totals[1], totals[2], 0, totals[3],
+                verdicts, patterns, issues);
     }
 
     private static void scanPatternInventory(Object owner, IGrid grid, Level level,
@@ -345,6 +348,22 @@ public final class PatternScanner {
         if (inv == null || be == null) {
             return;
         }
+        boolean provider = isPatternProviderHost(owner);
+        // ExtendedAE Plus' virtual crafting card intentionally completes a
+        // crafting job after the provider has dispatched its final batch,
+        // without waiting for any encoded output to return. Every pattern in
+        // such a provider is therefore a dispatch recipe rather than a claim
+        // that the adjacent target produces those outputs.
+        if (provider && isVirtualCraftingProvider(owner)) {
+            for (int slot = 0; slot < inv.size(); slot++) {
+                if (!inv.getStackInSlot(slot).isEmpty()) {
+                    totals[0]++;
+                    totals[1]++;
+                    totals[3]++;
+                }
+            }
+            return;
+        }
         // Wireless containers (AE2LT overloaded providers) belong to the main
         // network they connect to, not to their own (possibly empty) grid.
         IGrid checkGrid = grid;
@@ -355,7 +374,6 @@ public final class PatternScanner {
             }
         }
         BlockPos pos = be.getBlockPos();
-        boolean provider = isPatternProviderHost(owner);
         String location = describeContainer(owner, be, provider, pos);
         Map<AEItemKey, List<IPatternDetails>> providerDetails = new HashMap<>();
         if (owner instanceof PatternProviderLogicHost host) {
@@ -441,6 +459,36 @@ public final class PatternScanner {
                 || isMekEnergisticsMachine(owner)
                 || isAe2LtMatrixPort(owner)
                 || isAe2LtPigmeePatternProvider(owner);
+    }
+
+    private static boolean isVirtualCraftingProvider(Object owner) {
+        Object logic = owner instanceof PatternProviderLogicHost host
+                ? host.getLogic()
+                : readMember(owner, "getLogic");
+        if (Boolean.TRUE.equals(
+                readMember(logic, "eap$compatIsVirtualCraftingEnabled"))) {
+            return true;
+        }
+        // Released EA+ builds do not all expose the state bridge used by the
+        // current source tree. Reading the public upgrade inventory also
+        // avoids relying on the mixin's cached state having synchronized yet.
+        return containsVirtualCraftingCard(readMember(logic, "getUpgrades"))
+                || containsVirtualCraftingCard(readMember(logic, "eap$getCompatUpgrades"))
+                || containsVirtualCraftingCard(readMember(owner, "getUpgrades"));
+    }
+
+    private static boolean containsVirtualCraftingCard(Object inventory) {
+        if (!(inventory instanceof Iterable<?> iterable)) {
+            return false;
+        }
+        for (Object entry : iterable) {
+            if (entry instanceof ItemStack stack && !stack.isEmpty()
+                    && "extendedae_plus:virtual_crafting_card".equals(
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isMekEnergisticsMachine(Object owner) {
