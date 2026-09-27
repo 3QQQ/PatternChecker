@@ -1263,6 +1263,13 @@ public final class PatternScanner {
                     aliases("getOutput", "output"), aliases("getResult", "result"),
                     aliases("getOutputState", "outputState"),
                     aliases("getFluidOutput", "fluidOutput", "outputFluid"));
+            case "oritech" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getResults", "results"),
+                    aliases("getFluidOutputs", "fluidOutputs"));
+            case "actuallyadditions" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getOutput", "output"),
+                    aliases("getOutputOne", "outputOne"),
+                    aliases("getOutputTwo", "outputTwo"));
             case "ifeu" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("output", "getOutput"));
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1594,6 +1601,15 @@ public final class PatternScanner {
                     aliases("getIngredient", "ingredient"),
                     aliases("getFluidInput", "fluidInput", "inputFluid"),
                     aliases("getCatalyst", "catalyst"));
+            case "oritech" -> recipeRequirementsFromMembers(recipe,
+                    aliases("getInputs", "inputs"),
+                    aliases("getFluidInput", "fluidInput"));
+            case "actuallyadditions" -> recipeRequirementsFromMembers(recipe,
+                    aliases("getInput", "input"), aliases("getIngredient", "ingredient"),
+                    aliases("getStandOne", "standOne"),
+                    aliases("getStandTwo", "standTwo"),
+                    aliases("getStandThree", "standThree"),
+                    aliases("getStandFour", "standFour"));
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1810,6 +1826,10 @@ public final class PatternScanner {
                     : new RecipeRequirement(itemIngredient, Set.of(), Math.max(1L, amount));
         }
         Set<String> identifiers = identifiersFrom(ingredient);
+        // Oritech represents an absent fluid input with a zero-amount
+        // FluidIngredient whose resolved registry value is Fluids.EMPTY.
+        // It is a sentinel, not an input that a processing pattern must supply.
+        identifiers.remove("minecraft:empty");
         return identifiers.isEmpty()
                 ? null
                 : new RecipeRequirement(null, identifiers, Math.max(1L, amount));
@@ -1850,7 +1870,7 @@ public final class PatternScanner {
             identifiers.add(direct);
         }
         Object representations = invokeNoArg(value, "getRepresentations", "representations",
-                "getChemicalStacks", "getStacks", "getFluids", "getItems");
+                "getChemicalStacks", "getStacks", "getFluidStacks", "getFluids", "getItems");
         if (representations instanceof Iterable<?> iterable) {
             for (Object representation : iterable) {
                 String identifier = resourceIdentifier(representation);
@@ -2521,7 +2541,9 @@ public final class PatternScanner {
                 || namespace.equals("justdirethings")
                 || namespace.equals("justdynathings")
                 || namespace.equals("jdte")
-                || namespace.equals("industrialforegoing");
+                || namespace.equals("industrialforegoing")
+                || namespace.equals("oritech")
+                || namespace.equals("actuallyadditions");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -2784,6 +2806,42 @@ public final class PatternScanner {
                     List.of("productivebees:centrifuge");
             case "productivebees:bottler" ->
                     List.of("productivebees:bottler");
+            case "oritech:pulverizer_block" ->
+                    List.of("oritech:pulverizer");
+            case "oritech:fragment_forge_block" ->
+                    List.of("oritech:grinder");
+            case "oritech:assembler_block" ->
+                    List.of("oritech:assembler");
+            case "oritech:foundry_block" ->
+                    List.of("oritech:foundry");
+            case "oritech:refinery_block", "oritech:tainted_refinery_block" ->
+                    List.of("oritech:refinery");
+            case "oritech:cooler_block" ->
+                    List.of("oritech:cooler");
+            case "oritech:centrifuge_block" ->
+                    List.of("oritech:centrifuge", "oritech:centrifuge_fluid");
+            case "oritech:atomic_forge_block" ->
+                    List.of("oritech:atomic_forge");
+            case "oritech:powered_furnace_block" ->
+                    List.of("minecraft:smelting");
+            case "oritech:laser_arm_block" ->
+                    List.of("oritech:laser");
+            case "oritech:deep_drill_block" ->
+                    List.of("oritech:deep_drill");
+            case "oritech:accelerator_controller" ->
+                    List.of("oritech:particle_collision");
+            case "actuallyadditions:crusher", "actuallyadditions:crusher_double" ->
+                    List.of("actuallyadditions:crushing");
+            case "actuallyadditions:powered_furnace" ->
+                    List.of("minecraft:smelting");
+            case "actuallyadditions:canola_press" ->
+                    List.of("actuallyadditions:pressing");
+            case "actuallyadditions:fermenting_barrel" ->
+                    List.of("actuallyadditions:fermenting");
+            case "actuallyadditions:atomic_reconstructor" ->
+                    List.of("actuallyadditions:laser");
+            case "actuallyadditions:empowerer" ->
+                    List.of("actuallyadditions:empower");
             default -> List.of();
         };
     }
