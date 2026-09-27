@@ -90,6 +90,20 @@ public final class PatternScanner {
             "es.degrassi.mmreborn.api.controller.IMultiblockController";
     private static final String MMR_RECIPE_TYPE =
             "modular_machinery_reborn:machine_recipe";
+    private static final List<String> IMMERSIVE_ENGINEERING_PROCESSING_TYPES = List.of(
+            "immersiveengineering:alloy",
+            "immersiveengineering:arc_furnace",
+            "immersiveengineering:blast_furnace",
+            "immersiveengineering:blueprint",
+            "immersiveengineering:bottling_machine",
+            "immersiveengineering:coke_oven",
+            "immersiveengineering:crusher",
+            "immersiveengineering:fermenter",
+            "immersiveengineering:metal_press",
+            "immersiveengineering:mixer",
+            "immersiveengineering:refinery",
+            "immersiveengineering:sawmill",
+            "immersiveengineering:squeezer");
 
     @FunctionalInterface
     private interface MemberAccessor {
@@ -638,7 +652,7 @@ public final class PatternScanner {
             };
             verdicts.add(verdictLine(verdictKey, patternName, location, null));
             checkProcessingPattern(details, patternName, location, pos, issues, result,
-                    allowsReusableImbuementOutputs(level, details, context));
+                    allowsReusableProcessingOutputs(level, details, context));
         } else {
             addCraftingOutputs(details, scannedCraftingOutputs);
             // Decoding already validated that a crafting/stonecutting/smithing
@@ -925,8 +939,9 @@ public final class PatternScanner {
         }
 
         // An output identical to an input usually means a misconfigured loop.
-        // Ars Nouveau's imbuement chamber deliberately leaves pedestal items
-        // untouched, so automation may return them to AE for reuse.
+        // Some registered recipes deliberately return a reusable input: Ars
+        // imbuement keeps pedestal items, while IE bottling recipes can return
+        // their mold. Only suppress the warning after an exact recipe match.
         if (allowsReusableOutputs) {
             return;
         }
@@ -949,11 +964,21 @@ public final class PatternScanner {
 
     }
 
-    private static boolean allowsReusableImbuementOutputs(
+    private static boolean allowsReusableProcessingOutputs(
             Level level, IPatternDetails details, ScanContext context) {
         RecipeType<?> imbuement = recipeType("ars_nouveau:imbuement");
-        return imbuement != null
-                && hasMatchingMachineRecipe(level, details, imbuement, null, context);
+        if (imbuement != null
+                && hasMatchingMachineRecipe(level, details, imbuement, null, context)) {
+            return true;
+        }
+        for (String identifier : IMMERSIVE_ENGINEERING_PROCESSING_TYPES) {
+            RecipeType<?> type = recipeType(identifier);
+            if (type != null
+                    && hasMatchingMachineRecipe(level, details, type, null, context)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -988,8 +1013,7 @@ public final class PatternScanner {
             if (machineId != null && !machineId.equals(recipe.machineId())) {
                 continue;
             }
-            for (long scale : matchingRecipeScales(
-                    details, recipe, inputs)) {
+            for (long scale : matchingRecipeScales(details, recipe, inputs)) {
                 if (matchesRecipeInputsExactly(recipe.requirements(), inputs, scale)) {
                     context.machineRecipeMatches.put(cacheKey, true);
                     return true;
@@ -1392,6 +1416,8 @@ public final class PatternScanner {
             // so getResultItem() alone cannot be used to find the recipe.
             case "occultism" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("getRitualDummy"));
+            case "immersiveengineering" ->
+                    immersiveEngineeringRecipeOutputs(recipe, registryAccess);
             case "ifeu" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("output", "getOutput"));
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1473,6 +1499,24 @@ public final class PatternScanner {
             Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
         List<RecipeOutput> outputs = new ArrayList<>();
         addRecipeOutput(outputs, recipe.getResultItem(registryAccess));
+        return outputs;
+    }
+
+    private static List<RecipeOutput> immersiveEngineeringRecipeOutputs(
+            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+        List<RecipeOutput> outputs = recipeOutputsFromMembers(recipe, registryAccess,
+                aliases("getItemOutputs"), aliases("getFluidOutputs"),
+                aliases("output", "getOutput"),
+                aliases("itemOutput", "getItemOutput"),
+                aliases("fluidOutput", "getFluidOutput"),
+                aliases("slag"), aliases("secondaryOutputs"),
+                aliases("stripped"), aliases("secondaryStripping"));
+        if ("immersiveengineering:coke_oven".equals(recipeTypeId(recipe.getType()))) {
+            Object rawCreosote = firstMember(recipe, "creosoteOutput");
+            if (rawCreosote instanceof Number amount && amount.longValue() > 0) {
+                addUniqueRecipeOutput(outputs, "immersiveengineering:creosote", amount.longValue());
+            }
+        }
         return outputs;
     }
 
@@ -1592,7 +1636,7 @@ public final class PatternScanner {
                 "getItems", "items",
                 "getMainOutput", "mainOutput", "getMaxSecondaryOutput", "maxSecondaryOutput",
                 "getSecondaryOutput", "secondaryOutput", "getFluid", "fluid", "getFluids",
-                "fluids", "getChemical", "chemical", "resolve", "left", "right"
+                "fluids", "getChemical", "chemical", "resolve", "get", "left", "right"
         }) {
             Object nested = readMember(value, member);
             if (nested != null && nested != value) {
@@ -1735,6 +1779,7 @@ public final class PatternScanner {
             case "occultism" -> occultismRecipeRequirements(recipe);
             case "mysticalagriculture" -> mysticalAgricultureRecipeRequirements(recipe);
             case "ars_nouveau" -> arsNouveauRecipeRequirements(recipe);
+            case "immersiveengineering" -> immersiveEngineeringRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1839,6 +1884,31 @@ public final class PatternScanner {
                     recipeRequirementsFromMembers(recipe,
                             aliases("getInput", "input"),
                             aliases("getPedestalItems", "pedestalItems"));
+            default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    private static List<RecipeRequirement> immersiveEngineeringRecipeRequirements(
+            Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "immersiveengineering:alloy" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input0"), aliases("input1"));
+            case "immersiveengineering:blast_furnace",
+                    "immersiveengineering:coke_oven" ->
+                    recipeRequirementsFromMembers(recipe, aliases("input"));
+            case "immersiveengineering:arc_furnace",
+                    "immersiveengineering:blueprint",
+                    "immersiveengineering:bottling_machine",
+                    "immersiveengineering:crusher",
+                    "immersiveengineering:fermenter",
+                    "immersiveengineering:metal_press",
+                    "immersiveengineering:mixer",
+                    "immersiveengineering:refinery",
+                    "immersiveengineering:sawmill",
+                    "immersiveengineering:squeezer" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getItemInputs"), aliases("getFluidInputs"));
             default -> genericRecipeRequirements(recipe);
         };
     }
@@ -2014,7 +2084,8 @@ public final class PatternScanner {
             return null;
         }
         long amount = numericAmount(input, 1L);
-        Object ingredient = invokeNoArg(input, "getIngredient", "ingredient");
+        Object ingredient = invokeNoArg(input,
+                "getIngredient", "ingredient", "getBaseIngredient");
         if (ingredient == null) {
             ingredient = input;
         } else {
@@ -2447,7 +2518,20 @@ public final class PatternScanner {
         for (String identifier : List.of(
                 "occultism:ritual",
                 "ars_nouveau:enchanting_apparatus",
-                "ars_nouveau:imbuement")) {
+                "ars_nouveau:imbuement",
+                "immersiveengineering:alloy",
+                "immersiveengineering:arc_furnace",
+                "immersiveengineering:blast_furnace",
+                "immersiveengineering:blueprint",
+                "immersiveengineering:bottling_machine",
+                "immersiveengineering:coke_oven",
+                "immersiveengineering:crusher",
+                "immersiveengineering:fermenter",
+                "immersiveengineering:metal_press",
+                "immersiveengineering:mixer",
+                "immersiveengineering:refinery",
+                "immersiveengineering:sawmill",
+                "immersiveengineering:squeezer")) {
             RecipeType<?> type = recipeType(identifier);
             if (type != null
                     && hasMatchingMachineRecipe(level, details, type, null, context)) {
@@ -2869,7 +2953,8 @@ public final class PatternScanner {
                 || namespace.equals("actuallyadditions")
                 || namespace.equals("occultism")
                 || namespace.equals("mysticalagriculture")
-                || namespace.equals("ars_nouveau");
+                || namespace.equals("ars_nouveau")
+                || namespace.equals("immersiveengineering");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
