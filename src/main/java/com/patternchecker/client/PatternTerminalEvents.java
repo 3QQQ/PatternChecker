@@ -997,21 +997,22 @@ public final class PatternTerminalEvents {
                     minecraft().font.plainSubstrByWidth(status.getString(), maxWidth),
                     x, y, payload.bound() ? ACCENT_COLOR : DIM_TEXT_COLOR, false);
 
-            String secondLine;
-            int secondLineColor;
             if (!payload.notice().getString().isEmpty()) {
-                secondLine = payload.notice().getString();
-                secondLineColor = ACCENT_COLOR;
+                List<FormattedCharSequence> noticeLines =
+                        minecraft().font.split(payload.notice(), maxWidth);
+                for (int i = 0; i < Math.min(2, noticeLines.size()); i++) {
+                    gui.drawString(minecraft().font, noticeLines.get(i),
+                            x, y + 10 + i * 10, ACCENT_COLOR, false);
+                }
             } else {
                 ToolListPayload.Entry selected = selectedEntry();
-                secondLine = selected != null
+                String secondLine = selected != null
                         ? Component.translatable("patternchecker.menu.hoverHint").getString()
                         : Component.translatable("patternchecker.menu.selectHint").getString();
-                secondLineColor = DIM_TEXT_COLOR;
+                gui.drawString(minecraft().font,
+                        minecraft().font.plainSubstrByWidth(secondLine, maxWidth),
+                        x, y + 10, DIM_TEXT_COLOR, false);
             }
-            gui.drawString(minecraft().font,
-                    minecraft().font.plainSubstrByWidth(secondLine, maxWidth),
-                    x, y + 10, secondLineColor, false);
         }
 
         private ItemStack iconFor(String itemId) {
