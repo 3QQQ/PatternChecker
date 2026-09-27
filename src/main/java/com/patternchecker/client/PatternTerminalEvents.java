@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Adds a pattern-checker module to the left edge of the AE2 pattern encoding
@@ -46,6 +47,8 @@ public final class PatternTerminalEvents {
     private static Screen activeScreen;
     private static ToolPanel activePanel;
     private static EntryKey persistedSelectionKey;
+    private static int persistedSelectionRow = -1;
+    private static String persistedBoundLabel = "";
     private static boolean terminalPanelEnabled = true;
 
     private record EntryKey(String location, int slot) {
@@ -61,6 +64,12 @@ public final class PatternTerminalEvents {
             activeScreen = null;
             activePanel = null;
             return;
+        }
+        if (screen != activeScreen) {
+            // A newly opened terminal must wait for its own server response.
+            // Otherwise the previous tool's availability can leave a stale
+            // collapsed icon over another mod's button after the tool moves.
+            PatternCheckClient.resetToolList();
         }
         NetworkHandler.clearPendingToolList();
         int moduleHeight = Math.max(1, Math.min(MODULE_HEIGHT, screenHeight(screen)));
@@ -229,6 +238,7 @@ public final class PatternTerminalEvents {
         private int scroll;
         private int selected = -1;
         private EntryKey selectedKey;
+        private boolean restoreScrollOnSync;
         private final int anchorX;
         private final int anchorY;
         private final int expandedHeight;
@@ -256,7 +266,10 @@ public final class PatternTerminalEvents {
             this.anchorY = anchorY;
             this.expandedHeight = expandedHeight;
             this.selectedKey = selectionKey;
+            this.restoreScrollOnSync = selectionKey != null || persistedSelectionRow >= 0;
             refreshEntries(PatternCheckClient.getToolList());
+            selected = findMatchingEntry(cachedEntries, selectedKey);
+            restoreSelectionScroll();
             clampToScreen();
             panelToggleButton = new PatternButton(
                     x + width - COLLAPSED_SIZE, y, COLLAPSED_SIZE, COLLAPSED_SIZE,
@@ -411,11 +424,15 @@ public final class PatternTerminalEvents {
                 selected = entry.index();
                 selectedKey = keyOf(entry);
                 persistedSelectionKey = selectedKey;
+                persistedSelectionRow = row;
+                persistedBoundLabel = PatternCheckClient.getToolList().boundLabel();
+                restoreScrollOnSync = false;
                 sendAction(PatternToolActionPayload.ACTION_SELECT, selected);
             } else {
                 selected = -1;
                 selectedKey = null;
                 persistedSelectionKey = null;
+                persistedSelectionRow = -1;
             }
             return true;
         }
@@ -540,6 +557,7 @@ public final class PatternTerminalEvents {
                 return false;
             }
             scrollbarDragging = true;
+            restoreScrollOnSync = false;
             scrollbarDragOffset = mouseY >= thumbY && mouseY <= thumbY + thumbHeight
                     ? (int) mouseY - thumbY
                     : thumbHeight / 2;
@@ -577,6 +595,9 @@ public final class PatternTerminalEvents {
             int maxScroll = Math.max(0, entries().size() - visibleRows());
             int direction = scrollAmount > 0 ? -1 : scrollAmount < 0 ? 1 : 0;
             scroll = Math.max(0, Math.min(maxScroll, scroll + direction));
+            if (direction != 0) {
+                restoreScrollOnSync = false;
+            }
             return true;
         }
 
@@ -593,13 +614,26 @@ public final class PatternTerminalEvents {
             ToolListPayload polled = NetworkHandler.poll();
             if (polled != null) {
                 PatternCheckClient.setToolList(polled);
-                refreshEntries(polled);
-                selected = findMatchingEntry(polled.entries(), selectedKey);
-                if (selected < 0) {
+                if (persistedSelectionRow >= 0
+                        && !Objects.equals(persistedBoundLabel, polled.boundLabel())) {
                     selectedKey = null;
                     persistedSelectionKey = null;
+                    persistedSelectionRow = -1;
+                    restoreScrollOnSync = false;
+                    scroll = 0;
                 }
-                scroll = 0;
+                refreshEntries(polled);
+                selected = findMatchingEntry(cachedEntries, selectedKey);
+                if (restoreScrollOnSync) {
+                    restoreSelectionScroll();
+                    restoreScrollOnSync = false;
+                } else {
+                    int selectedRow = selectedRow();
+                    if (selectedRow >= 0) {
+                        persistedSelectionRow = selectedRow;
+                    }
+                    scroll = Math.min(scroll, Math.max(0, cachedEntries.size() - visibleRows()));
+                }
             }
             ToolListPayload payload = PatternCheckClient.getToolList();
             if (cachedEntries.isEmpty() && !payload.entries().isEmpty()) {
@@ -656,6 +690,31 @@ public final class PatternTerminalEvents {
 
         private static EntryKey keyOf(ToolListPayload.Entry entry) {
             return new EntryKey(entry.location(), entry.slot());
+        }
+
+        private int selectedRow() {
+            if (selectedKey == null) {
+                return -1;
+            }
+            for (int i = 0; i < cachedEntries.size(); i++) {
+                if (keyOf(cachedEntries.get(i)).equals(selectedKey)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private void restoreSelectionScroll() {
+            int selectedRow = selectedRow();
+            if (selectedRow >= 0) {
+                persistedSelectionRow = selectedRow;
+            }
+            // The selected pattern may have disappeared after processing.
+            // Its old row then keeps the next pattern close to the top.
+            int targetRow = selectedRow >= 0 ? selectedRow : persistedSelectionRow;
+            if (targetRow >= 0) {
+                scroll = Math.min(targetRow, Math.max(0, cachedEntries.size() - visibleRows()));
+            }
         }
 
         private static int findMatchingEntry(
