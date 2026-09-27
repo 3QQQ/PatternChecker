@@ -68,8 +68,16 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
     private AE2Button uploadButton;
     private AE2Button editButton;
 
+    private record SelectionKey(String location, int slot) {
+    }
+
+    private static SelectionKey rememberedSelection;
+    private static String rememberedBoundLabel = "";
+    private static int rememberedRow;
+
     private int scroll;
     private int selected = -1;
+    private boolean restoringSelection = true;
 
     public PatternCheckScreen(PatternCheckMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -194,6 +202,9 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         ToolListPayload.Entry entry = entryAt(mouseX, mouseY);
         if (entry != null) {
             selected = entry.index();
+            rememberedSelection = new SelectionKey(entry.location(), entry.slot());
+            rememberedBoundLabel = PatternCheckClient.getToolList().boundLabel();
+            rememberedRow = scroll + ((int) mouseY - (this.topPos + LIST_TOP)) / ROW_HEIGHT;
             return true;
         }
 
@@ -203,9 +214,49 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         int listBottom = this.topPos + listBottom();
         if (mouseX >= listLeft && mouseX < listRight && mouseY >= listTop && mouseY < listBottom) {
             selected = -1;
+            rememberedSelection = null;
+            rememberedRow = 0;
             return true;
         }
         return handled;
+    }
+
+    private void restoreSelection(ToolListPayload payload) {
+        List<ToolListPayload.Entry> entries = entries();
+        int maxScroll = Math.max(0, entries.size() - visibleRows());
+        if (!rememberedBoundLabel.equals(payload.boundLabel())) {
+            selected = -1;
+            scroll = restoringSelection ? 0 : Math.min(scroll, maxScroll);
+            restoringSelection = false;
+            return;
+        }
+
+        if (rememberedSelection == null) {
+            selected = -1;
+            scroll = restoringSelection ? Math.min(rememberedRow, maxScroll) : Math.min(scroll, maxScroll);
+            restoringSelection = false;
+            return;
+        }
+
+        for (int row = 0; row < entries.size(); row++) {
+            ToolListPayload.Entry entry = entries.get(row);
+            if (rememberedSelection.equals(new SelectionKey(entry.location(), entry.slot()))) {
+                selected = entry.index();
+                rememberedRow = row;
+                if (restoringSelection || row < scroll) {
+                    scroll = Math.min(row, maxScroll);
+                } else if (row >= scroll + visibleRows()) {
+                    scroll = Math.min(row - visibleRows() + 1, maxScroll);
+                }
+                restoringSelection = false;
+                return;
+            }
+        }
+
+        selected = -1;
+        scroll = restoringSelection ? Math.min(rememberedRow, maxScroll) : Math.min(scroll, maxScroll);
+        rememberedSelection = null;
+        restoringSelection = false;
     }
 
     @Override
@@ -214,8 +265,7 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         ToolListPayload polled = NetworkHandler.poll();
         if (polled != null) {
             PatternCheckClient.setToolList(polled);
-            selected = -1;
-            scroll = 0;
+            restoreSelection(polled);
         }
 
         ToolListPayload payload = PatternCheckClient.getToolList();
