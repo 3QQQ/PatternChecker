@@ -19,6 +19,7 @@ import appeng.helpers.patternprovider.PatternProviderLogicHost;
 import appeng.helpers.patternprovider.PatternContainer;
 import appeng.parts.AEBasePart;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -132,7 +133,8 @@ public final class PatternScanner {
 
     private record PreparedRecipe(RecipeType<?> type, List<RecipeRequirement> requirements,
                                   List<RecipeOutput> outputs, String machineId,
-                                  boolean requireAllOutputs) {
+                                  boolean requireAllOutputs,
+                                  boolean dynamicOutputAmount) {
     }
 
     private record RecipeMatchKey(DuplicateSignature signature, RecipeType<?> onlyType,
@@ -221,7 +223,8 @@ public final class PatternScanner {
                                     : mmrRecipe.requirements()),
                             outputs,
                             mmrRecipe == null ? null : mmrRecipe.machineId(),
-                            requiresAllRecipeOutputs(recipe));
+                            requiresAllRecipeOutputs(recipe),
+                            hasDynamicOutputAmount(recipe));
                     Set<String> indexedOutputs = new HashSet<>();
                     for (RecipeOutput output : outputs) {
                         if (output.identifier() != null && indexedOutputs.add(output.identifier())) {
@@ -924,7 +927,7 @@ public final class PatternScanner {
                 continue;
             }
             for (long scale : matchingRecipeScales(
-                    details, recipe.outputs(), recipe.requireAllOutputs())) {
+                    details, recipe, inputs)) {
                 if (matchesRecipeInputsExactly(recipe.requirements(), inputs, scale)) {
                     context.machineRecipeMatches.put(cacheKey, true);
                     return true;
@@ -950,8 +953,8 @@ public final class PatternScanner {
      * required.
      */
     private static Set<Long> matchingRecipeScales(IPatternDetails details,
-                                                  List<RecipeOutput> recipeOutputs,
-                                                  boolean requireAllOutputs) {
+                                                  PreparedRecipe recipe,
+                                                  List<PatternInputSlot> inputs) {
         Map<String, Long> patternAmounts = new LinkedHashMap<>();
         for (GenericStack output : details.getOutputs()) {
             if (output == null || !(output.what() instanceof AEKey key) || output.amount() <= 0) {
@@ -960,12 +963,37 @@ public final class PatternScanner {
             patternAmounts.merge(key.getId().toString(), output.amount(), PatternScanner::saturatedAdd);
         }
         Map<String, Long> recipeAmounts = new LinkedHashMap<>();
-        for (RecipeOutput output : recipeOutputs) {
+        for (RecipeOutput output : recipe.outputs()) {
             recipeAmounts.merge(output.identifier(), Math.max(1L, output.amount()),
                     PatternScanner::saturatedAdd);
         }
-        if (requireAllOutputs && !patternAmounts.keySet().equals(recipeAmounts.keySet())) {
+        if (recipe.requireAllOutputs() && !patternAmounts.keySet().equals(recipeAmounts.keySet())) {
             return Set.of();
+        }
+        if (!recipeAmounts.keySet().containsAll(patternAmounts.keySet())) {
+            return Set.of();
+        }
+
+        // Occultism crusher and crystallizer spirits apply a configurable
+        // output multiplier after the recipe has assembled. The recipe itself
+        // therefore cannot provide a stable output count. Keep validating the
+        // output identity, then derive operation counts from the encoded input
+        // instead of treating a configured multiplier as a broken pattern.
+        if (recipe.dynamicOutputAmount()) {
+            Set<Long> inputScales = new HashSet<>(Set.of(1L));
+            for (RecipeRequirement requirement : recipe.requirements()) {
+                long required = Math.max(1L, requirement.amount());
+                for (PatternInputSlot slot : inputs) {
+                    for (PatternInputCandidate candidate : slot.candidates()) {
+                        if (matchesRequirement(requirement, candidate)
+                                && candidate.amount() % required == 0) {
+                            inputScales.add(candidate.amount() / required);
+                        }
+                    }
+                }
+            }
+            inputScales.removeIf(scale -> scale <= 0);
+            return inputScales;
         }
 
         Set<Long> scales = null;
@@ -986,6 +1014,16 @@ public final class PatternScanner {
             }
         }
         return scales == null ? Set.of() : scales;
+    }
+
+    private static boolean hasDynamicOutputAmount(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "occultism:crushing" ->
+                    !Boolean.TRUE.equals(firstMember(recipe, "getIgnoreCrushingMultiplier"));
+            case "occultism:crystallize" ->
+                    !Boolean.TRUE.equals(firstMember(recipe, "getIgnoreCrystallizeMultiplier"));
+            default -> false;
+        };
     }
 
     private static boolean requiresAllRecipeOutputs(Recipe<?> recipe) {
@@ -1270,6 +1308,12 @@ public final class PatternScanner {
                     aliases("getOutput", "output"),
                     aliases("getOutputOne", "outputOne"),
                     aliases("getOutputTwo", "outputTwo"));
+            // Occultism ritual automation encodes the JEI/EMI ritual dummy as
+            // the processing-pattern output. The actual ritual result can be
+            // an entity, a command side effect, or a different item entirely,
+            // so getResultItem() alone cannot be used to find the recipe.
+            case "occultism" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getRitualDummy"));
             case "ifeu" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("output", "getOutput"));
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1610,6 +1654,8 @@ public final class PatternScanner {
                     aliases("getStandTwo", "standTwo"),
                     aliases("getStandThree", "standThree"),
                     aliases("getStandFour", "standFour"));
+            case "occultism" -> occultismRecipeRequirements(recipe);
+            case "mysticalagriculture" -> mysticalAgricultureRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1633,6 +1679,72 @@ public final class PatternScanner {
             case "enderio" -> enderIoRecipeRequirements(recipe);
             default -> genericRecipeRequirements(recipe);
         };
+    }
+
+    private static List<RecipeRequirement> occultismRecipeRequirements(Recipe<?> recipe) {
+        if ("occultism:ritual".equals(recipeTypeId(recipe.getType()))) {
+            return recipeRequirementsFromMembers(recipe,
+                    aliases("getActivationItem"), aliases("getIngredients"));
+        }
+        return genericRecipeRequirements(recipe);
+    }
+
+    private static List<RecipeRequirement> mysticalAgricultureRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            // The infusion recipe deliberately omits the central altar
+            // ingredient from Recipe#getIngredients().
+            case "mysticalagriculture:infusion" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getAltarIngredient"), aliases("getIngredients"));
+            case "mysticalagriculture:awakening" ->
+                    mysticalAgricultureAwakeningRequirements(recipe);
+            default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    /**
+     * AwakeningRecipe exposes its four essence stacks as plain Ingredients,
+     * which drops their stack counts (commonly 10 or 20). Pair those entries
+     * back with getEssences() so the encoded processing pattern is checked
+     * against the quantities the altar actually consumes.
+     */
+    private static List<RecipeRequirement> mysticalAgricultureAwakeningRequirements(
+            Recipe<?> recipe) {
+        List<RecipeRequirement> requirements = new ArrayList<>();
+        addRecipeRequirements(requirements, firstMember(recipe, "getAltarIngredient"));
+
+        List<ItemStack> essences = new ArrayList<>();
+        Object rawEssences = firstMember(recipe, "getEssences");
+        if (rawEssences instanceof Iterable<?> iterable) {
+            for (Object entry : iterable) {
+                if (entry instanceof ItemStack stack && !stack.isEmpty()) {
+                    essences.add(stack);
+                }
+            }
+        }
+        boolean[] usedEssences = new boolean[essences.size()];
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (ingredient == null || ingredient.isEmpty()) {
+                continue;
+            }
+            ItemStack matchedEssence = ItemStack.EMPTY;
+            int matchedIndex = -1;
+            for (int i = 0; i < essences.size(); i++) {
+                if (!usedEssences[i] && ingredient.test(essences.get(i))) {
+                    matchedEssence = essences.get(i);
+                    matchedIndex = i;
+                    break;
+                }
+            }
+            if (matchedIndex >= 0) {
+                usedEssences[matchedIndex] = true;
+                requirements.add(new RecipeRequirement(
+                        ingredient, Set.of(), matchedEssence.getCount()));
+            } else {
+                requirements.add(new RecipeRequirement(ingredient, Set.of(), 1L));
+            }
+        }
+        return requirements;
     }
 
     private static List<RecipeRequirement> ae2LtRecipeRequirements(Recipe<?> recipe) {
@@ -1979,6 +2091,15 @@ public final class PatternScanner {
         if (cached != null) {
             return cached;
         }
+        // Occultism's binding-book recipe is intentionally fully dynamic:
+        // getIngredients() and getResultItem() are both empty, while assemble()
+        // copies a renamed Dictionary of Spirits into the bound book's
+        // occultism:spirit_name component. It cannot be found by the static
+        // recipe index below even though AE2 decoded the pattern successfully.
+        if (matchesNamedOccultismBindingBookPattern(details)) {
+            context.currentRecipeMatches.put(signature, true);
+            return true;
+        }
         List<ItemStack> inputStacks = patternInputStacks(details);
         if (inputStacks.isEmpty()) {
             return true;
@@ -2025,6 +2146,81 @@ public final class PatternScanner {
         return false;
     }
 
+    private static boolean matchesNamedOccultismBindingBookPattern(IPatternDetails details) {
+        ItemStack namedDictionary = ItemStack.EMPTY;
+        String unboundBookId = null;
+        int occupiedInputs = 0;
+
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            GenericStack[] possible = input.getPossibleInputs();
+            if (possible == null || possible.length == 0) {
+                continue;
+            }
+            occupiedInputs++;
+            ItemStack dictionaryCandidate = ItemStack.EMPTY;
+            String bookCandidate = null;
+            for (GenericStack candidate : possible) {
+                if (candidate == null || !(candidate.what() instanceof AEItemKey key)) {
+                    continue;
+                }
+                ItemStack stack = key.toStack();
+                String id = key.getId().toString();
+                if (id.equals("occultism:dictionary_of_spirits")
+                        && stack.has(DataComponents.CUSTOM_NAME)) {
+                    dictionaryCandidate = stack;
+                } else if (boundOccultismBookId(id) != null) {
+                    bookCandidate = id;
+                }
+            }
+            if (!dictionaryCandidate.isEmpty()) {
+                if (!namedDictionary.isEmpty()) {
+                    return false;
+                }
+                namedDictionary = dictionaryCandidate;
+            } else if (bookCandidate != null) {
+                if (unboundBookId != null) {
+                    return false;
+                }
+                unboundBookId = bookCandidate;
+            } else {
+                return false;
+            }
+        }
+
+        if (occupiedInputs != 2 || namedDictionary.isEmpty() || unboundBookId == null
+                || details.getOutputs().size() != 1) {
+            return false;
+        }
+        GenericStack output = details.getOutputs().getFirst();
+        if (output == null || !(output.what() instanceof AEItemKey outputKey)
+                || !boundOccultismBookId(unboundBookId).equals(outputKey.getId().toString())) {
+            return false;
+        }
+
+        String expectedSpiritName = namedDictionary.get(DataComponents.CUSTOM_NAME).getString();
+        ItemStack outputStack = outputKey.toStack();
+        return outputStack.getComponents().stream().anyMatch(component -> {
+            ResourceLocation componentId = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(component.type());
+            return componentId != null
+                    && componentId.toString().equals("occultism:spirit_name")
+                    && expectedSpiritName.equals(String.valueOf(component.value()));
+        });
+    }
+
+    private static String boundOccultismBookId(String inputId) {
+        return switch (inputId) {
+            case "occultism:book_of_binding_foliot" ->
+                    "occultism:book_of_binding_bound_foliot";
+            case "occultism:book_of_binding_djinni" ->
+                    "occultism:book_of_binding_bound_djinni";
+            case "occultism:book_of_binding_afrit" ->
+                    "occultism:book_of_binding_bound_afrit";
+            case "occultism:book_of_binding_marid" ->
+                    "occultism:book_of_binding_bound_marid";
+            default -> null;
+        };
+    }
+
     private static List<ItemStack> patternInputStacks(IPatternDetails details) {
         List<ItemStack> inputStacks = new ArrayList<>();
         for (IPatternDetails.IInput input : details.getInputs()) {
@@ -2056,6 +2252,18 @@ public final class PatternScanner {
         if (host == null || pos == null) {
             // Patterns in ME storage are not assigned to a provider yet.
             return ProcessingMachineResult.UNKNOWN;
+        }
+        // Occultism rituals are distributed processes rather than recipes run
+        // by one machine directly facing the provider. Vanilla AE2 automation
+        // commonly uses a subnet to feed several sacrificial bowls, while
+        // AE2CS can route every input to a different remote position. Once the
+        // encoded inputs and ritual-dummy output exactly match a registered
+        // ritual recipe, a provider-adjacency check cannot add useful certainty.
+        RecipeType<?> occultismRitual = recipeType("occultism:ritual");
+        if (occultismRitual != null
+                && hasMatchingMachineRecipe(
+                        level, details, occultismRitual, null, context)) {
+            return ProcessingMachineResult.MATCH;
         }
         if (isAe2LtPackagedPatternProvider(host)) {
             return checkAe2LtPackagedProvider(host, level, pos, details, context);
@@ -2132,6 +2340,14 @@ public final class PatternScanner {
                 || hasNonItemIO(details)
                 ? ProcessingMachineResult.UNKNOWN
                 : ProcessingMachineResult.NO_RECIPE;
+    }
+
+    private static RecipeType<?> recipeType(String identifier) {
+        ResourceLocation id = ResourceLocation.parse(identifier);
+        RecipeType<?> type = BuiltInRegistries.RECIPE_TYPE.get(id);
+        return type != null && id.equals(BuiltInRegistries.RECIPE_TYPE.getKey(type))
+                ? type
+                : null;
     }
 
     /**
@@ -2543,7 +2759,9 @@ public final class PatternScanner {
                 || namespace.equals("jdte")
                 || namespace.equals("industrialforegoing")
                 || namespace.equals("oritech")
-                || namespace.equals("actuallyadditions");
+                || namespace.equals("actuallyadditions")
+                || namespace.equals("occultism")
+                || namespace.equals("mysticalagriculture");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -2842,6 +3060,23 @@ public final class PatternScanner {
                     List.of("actuallyadditions:laser");
             case "actuallyadditions:empowerer" ->
                     List.of("actuallyadditions:empower");
+            case "occultism:spirit_fire" ->
+                    List.of("occultism:spirit_fire");
+            case "occultism:golden_sacrificial_bowl",
+                    "occultism:dark_golden_sacrificial_bowl",
+                    "occultism:iesnium_sacrificial_bowl",
+                    "occultism:dark_iesnium_sacrificial_bowl" ->
+                    List.of("occultism:ritual");
+            case "mysticalagriculture:infusion_altar" ->
+                    List.of("mysticalagriculture:infusion");
+            case "mysticalagriculture:awakening_altar" ->
+                    List.of("mysticalagriculture:awakening");
+            case "mysticalagriculture:furnace" ->
+                    List.of("minecraft:smelting");
+            case "mysticalagriculture:seed_reprocessor" ->
+                    List.of("mysticalagriculture:reprocessor");
+            case "mysticalagriculture:soul_extractor" ->
+                    List.of("mysticalagriculture:soul_extraction");
             default -> List.of();
         };
     }

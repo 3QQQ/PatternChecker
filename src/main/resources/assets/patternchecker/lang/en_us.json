@@ -98,7 +98,7 @@
   "patternchecker.issue.processing.zeroOutput": "Processing pattern has an output with invalid amount (<= 0)",
   "patternchecker.issue.processing.selfLoop": "An output is identical to an input - likely a misconfigured loop",
   "patternchecker.issue.processing.noTarget": "Pattern provider has no pushable machine target; the processing pattern cannot run",
-  "patternchecker.issue.processing.wrongMachine": "The processing recipe exists, but the machine facing this provider cannot run it (molecular assemblers only support crafting patterns)",
+  "patternchecker.issue.processing.wrongMachine": "The processing recipe exists, but this provider's execution target cannot run it",
   "patternchecker.issue.processing.noRecipe": "No machine recipe found that turns the inputs into this output (may rely on mod-specific machine logic)",
   "patternchecker.verdict.craftable": "Craftable (recipe exists)",
   "patternchecker.verdict.processing.recipe": "Producible (matching machine recipe found)",
