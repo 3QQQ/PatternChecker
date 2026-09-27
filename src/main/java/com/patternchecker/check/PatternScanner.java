@@ -252,8 +252,9 @@ public final class PatternScanner {
             return machineRecipesByOutput.getOrDefault(identifier, List.of());
         }
 
-        private MachineState machineState(Object host, BlockPos pos) {
-            return machineStates.computeIfAbsent(host, ignored -> buildMachineState(host, level, pos));
+        private MachineState machineState(Object host, Level providerLevel, BlockPos pos) {
+            return machineStates.computeIfAbsent(
+                    host, ignored -> buildMachineState(host, providerLevel, pos));
         }
     }
 
@@ -362,6 +363,7 @@ public final class PatternScanner {
         if (inv == null || be == null) {
             return;
         }
+        Level providerLevel = be.getLevel() != null ? be.getLevel() : level;
         boolean provider = isPatternProviderHost(owner);
         // ExtendedAE Plus' virtual crafting card intentionally completes a
         // crafting job after the provider has dispatched its final batch,
@@ -381,7 +383,7 @@ public final class PatternScanner {
         // Wireless containers (AE2LT overloaded providers) belong to the main
         // network they connect to, not to their own (possibly empty) grid.
         IGrid checkGrid = grid;
-        if (level instanceof ServerLevel serverLevel) {
+        if (providerLevel instanceof ServerLevel serverLevel) {
             IGrid resolved = WirelessHelper.resolveGrid(serverLevel, owner);
             if (resolved != null) {
                 checkGrid = resolved;
@@ -419,7 +421,7 @@ public final class PatternScanner {
             if (matchingDetails != null && !matchingDetails.isEmpty()) {
                 providerDetail = matchingDetails.removeFirst();
             }
-            check(stack, providerDetail, checkGrid, level, location, pos, slot,
+            check(stack, providerDetail, checkGrid, providerLevel, location, pos, slot,
                     provider ? owner : null,
                     issues, verdicts, patterns, duplicateCandidates,
                     inputIssueCandidates, scannedCraftingOutputs, 1, context);
@@ -642,7 +644,7 @@ public final class PatternScanner {
             ProcessingMachineResult result = checkProcessingMachine(host, level, pos, details, context);
             if (result == ProcessingMachineResult.NO_RECIPE
                     || result == ProcessingMachineResult.WRONG_MACHINE) {
-                logMachineMismatch(host, pos, details, result, context);
+                logMachineMismatch(host, level, pos, details, result, context);
             }
             String verdictKey = switch (result) {
                 case MATCH, UNKNOWN -> "patternchecker.verdict.processing.recipe";
@@ -1309,16 +1311,18 @@ public final class PatternScanner {
         }
     }
 
-    private static void logMachineMismatch(Object host, BlockPos pos, IPatternDetails details,
+    private static void logMachineMismatch(Object host, Level level, BlockPos pos,
+                                           IPatternDetails details,
                                            ProcessingMachineResult result, ScanContext context) {
         if (host == null || pos == null) {
             return;
         }
-        String diagnosticKey = pos.asLong() + ":" + result + ":" + duplicateSignature(details);
+        String diagnosticKey = level.dimension().location() + ":" + pos.asLong()
+                + ":" + result + ":" + duplicateSignature(details);
         if (!context.loggedMachineMismatches.add(diagnosticKey)) {
             return;
         }
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         List<String> recipeTypes = machine.types().stream()
                 .map(PatternScanner::recipeTypeId)
                 .sorted()
@@ -2432,7 +2436,7 @@ public final class PatternScanner {
             return checkAe2LtPackagedProvider(host, level, pos, details, context);
         }
 
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         Set<RecipeType<?>> types = machine.types();
         boolean hasTarget = machine.hasTarget();
         boolean craftingOnly = machine.craftingOnly();
