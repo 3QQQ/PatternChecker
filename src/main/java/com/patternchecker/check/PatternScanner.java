@@ -589,7 +589,8 @@ public final class PatternScanner {
                 case NO_RECIPE -> "patternchecker.verdict.processing.noRecipe";
             };
             verdicts.add(verdictLine(verdictKey, patternName, location, null));
-            checkProcessingPattern(details, patternName, location, pos, issues, result);
+            checkProcessingPattern(details, patternName, location, pos, issues, result,
+                    allowsReusableImbuementOutputs(level, details, context));
         } else {
             addCraftingOutputs(details, scannedCraftingOutputs);
             // Decoding already validated that a crafting/stonecutting/smithing
@@ -838,7 +839,8 @@ public final class PatternScanner {
 
     private static void checkProcessingPattern(IPatternDetails details, Component patternName, String location,
                                                BlockPos pos, List<PatternIssue> issues,
-                                               ProcessingMachineResult machineResult) {
+                                               ProcessingMachineResult machineResult,
+                                               boolean allowsReusableOutputs) {
         String issueKey = switch (machineResult) {
             case NO_TARGET -> "patternchecker.issue.processing.noTarget";
             case WRONG_MACHINE -> "patternchecker.issue.processing.wrongMachine";
@@ -875,6 +877,11 @@ public final class PatternScanner {
         }
 
         // An output identical to an input usually means a misconfigured loop.
+        // Ars Nouveau's imbuement chamber deliberately leaves pedestal items
+        // untouched, so automation may return them to AE for reuse.
+        if (allowsReusableOutputs) {
+            return;
+        }
         Set<AEKey> inputKeys = new HashSet<>();
         for (IPatternDetails.IInput input : details.getInputs()) {
             for (GenericStack candidate : input.getPossibleInputs()) {
@@ -892,6 +899,13 @@ public final class PatternScanner {
             }
         }
 
+    }
+
+    private static boolean allowsReusableImbuementOutputs(
+            Level level, IPatternDetails details, ScanContext context) {
+        RecipeType<?> imbuement = recipeType("ars_nouveau:imbuement");
+        return imbuement != null
+                && hasMatchingMachineRecipe(level, details, imbuement, null, context);
     }
 
     /**
@@ -970,7 +984,8 @@ public final class PatternScanner {
         if (recipe.requireAllOutputs() && !patternAmounts.keySet().equals(recipeAmounts.keySet())) {
             return Set.of();
         }
-        if (!recipeAmounts.keySet().containsAll(patternAmounts.keySet())) {
+        boolean mainOutputOnly = matchesByMainOutputOnly(recipe.type());
+        if (!mainOutputOnly && !recipeAmounts.keySet().containsAll(patternAmounts.keySet())) {
             return Set.of();
         }
 
@@ -999,8 +1014,13 @@ public final class PatternScanner {
         Set<Long> scales = null;
         for (Map.Entry<String, Long> patternOutput : patternAmounts.entrySet()) {
             Long recipeAmount = recipeAmounts.get(patternOutput.getKey());
-            if (recipeAmount == null || recipeAmount <= 0
-                    || patternOutput.getValue() % recipeAmount != 0) {
+            if (recipeAmount == null) {
+                if (mainOutputOnly) {
+                    continue;
+                }
+                return Set.of();
+            }
+            if (recipeAmount <= 0 || patternOutput.getValue() % recipeAmount != 0) {
                 return Set.of();
             }
             long scale = patternOutput.getValue() / recipeAmount;
@@ -1014,6 +1034,16 @@ public final class PatternScanner {
             }
         }
         return scales == null ? Set.of() : scales;
+    }
+
+    private static boolean matchesByMainOutputOnly(RecipeType<?> type) {
+        return switch (recipeTypeId(type)) {
+            // Ars automation commonly encodes reusable pedestal items as
+            // additional outputs. They are not part of getResultItem(), and
+            // their recovery depends on the surrounding automation layout.
+            case "ars_nouveau:imbuement" -> true;
+            default -> false;
+        };
     }
 
     private static boolean hasDynamicOutputAmount(Recipe<?> recipe) {
@@ -1656,6 +1686,7 @@ public final class PatternScanner {
                     aliases("getStandFour", "standFour"));
             case "occultism" -> occultismRecipeRequirements(recipe);
             case "mysticalagriculture" -> mysticalAgricultureRecipeRequirements(recipe);
+            case "ars_nouveau" -> arsNouveauRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1745,6 +1776,23 @@ public final class PatternScanner {
             }
         }
         return requirements;
+    }
+
+    private static List<RecipeRequirement> arsNouveauRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            // The apparatus catalyst/reagent is stored separately from the
+            // surrounding pedestal ingredients.
+            case "ars_nouveau:enchanting_apparatus" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("reagent"), aliases("pedestalItems"));
+            // The chamber input is likewise separate from its optional
+            // pedestal accelerants/catalysts.
+            case "ars_nouveau:imbuement" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getInput", "input"),
+                            aliases("getPedestalItems", "pedestalItems"));
+            default -> genericRecipeRequirements(recipe);
+        };
     }
 
     private static List<RecipeRequirement> ae2LtRecipeRequirements(Recipe<?> recipe) {
@@ -2253,16 +2301,12 @@ public final class PatternScanner {
             // Patterns in ME storage are not assigned to a provider yet.
             return ProcessingMachineResult.UNKNOWN;
         }
-        // Occultism rituals are distributed processes rather than recipes run
-        // by one machine directly facing the provider. Vanilla AE2 automation
-        // commonly uses a subnet to feed several sacrificial bowls, while
-        // AE2CS can route every input to a different remote position. Once the
-        // encoded inputs and ritual-dummy output exactly match a registered
-        // ritual recipe, a provider-adjacency check cannot add useful certainty.
-        RecipeType<?> occultismRitual = recipeType("occultism:ritual");
-        if (occultismRitual != null
-                && hasMatchingMachineRecipe(
-                        level, details, occultismRitual, null, context)) {
+        // Distributed recipes feed one central block plus several surrounding
+        // pedestals/bowls. Vanilla AE2 automation commonly uses a subnet or
+        // another distributor, so provider adjacency cannot identify the real
+        // executor. Keep the exact recipe check, but do not require one facing
+        // machine for these recipe types.
+        if (matchesDistributedProcessingRecipe(level, details, context)) {
             return ProcessingMachineResult.MATCH;
         }
         if (isAe2LtPackagedPatternProvider(host)) {
@@ -2348,6 +2392,21 @@ public final class PatternScanner {
         return type != null && id.equals(BuiltInRegistries.RECIPE_TYPE.getKey(type))
                 ? type
                 : null;
+    }
+
+    private static boolean matchesDistributedProcessingRecipe(
+            Level level, IPatternDetails details, ScanContext context) {
+        for (String identifier : List.of(
+                "occultism:ritual",
+                "ars_nouveau:enchanting_apparatus",
+                "ars_nouveau:imbuement")) {
+            RecipeType<?> type = recipeType(identifier);
+            if (type != null
+                    && hasMatchingMachineRecipe(level, details, type, null, context)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2761,7 +2820,8 @@ public final class PatternScanner {
                 || namespace.equals("oritech")
                 || namespace.equals("actuallyadditions")
                 || namespace.equals("occultism")
-                || namespace.equals("mysticalagriculture");
+                || namespace.equals("mysticalagriculture")
+                || namespace.equals("ars_nouveau");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -3077,6 +3137,10 @@ public final class PatternScanner {
                     List.of("mysticalagriculture:reprocessor");
             case "mysticalagriculture:soul_extractor" ->
                     List.of("mysticalagriculture:soul_extraction");
+            case "ars_nouveau:enchanting_apparatus" ->
+                    List.of("ars_nouveau:enchanting_apparatus");
+            case "ars_nouveau:imbuement_chamber" ->
+                    List.of("ars_nouveau:imbuement");
             default -> List.of();
         };
     }
