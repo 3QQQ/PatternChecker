@@ -102,6 +102,7 @@
   "patternchecker.issue.processing.noRecipe": "未找到能将输入加工为该输出的机器配方（可能为模组机器专属逻辑）",
   "patternchecker.verdict.craftable": "可合成（当前配方存在）",
   "patternchecker.verdict.processing.recipe": "可产出（配方库中找到匹配的机器配方）",
+  "patternchecker.verdict.processing.unknown": "机器配方未能确认（可能依赖持久材料或模组专属逻辑）",
   "patternchecker.verdict.processing.fluid": "可产出（含流体输入/输出，机器配方未校验）",
   "patternchecker.verdict.processing.noTarget": "不可产出（样板供应器没有机器目标）",
   "patternchecker.verdict.processing.wrongMachine": "不可产出（配方与样板供应器面对的机器不对应）",
