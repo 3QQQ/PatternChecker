@@ -21,5 +21,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Fetch AE2 build dependency
+        run: |
+          mkdir -p libs/1.20.1
+          curl --fail --location --retry 3 \
+            --output libs/1.20.1/appliedenergistics2-forge-15.4.9.jar \
+            https://edge.forgecdn.net/files/7096/071/appliedenergistics2-forge-15.4.9.jar
+          echo '52c85b33e483f1ebaca1ff9c81040e6d178dfd571ece96f6fd0d4dc76f682e42  libs/1.20.1/appliedenergistics2-forge-15.4.9.jar' | sha256sum --check
+
       - name: Build with Gradle
         run: ./gradlew build
