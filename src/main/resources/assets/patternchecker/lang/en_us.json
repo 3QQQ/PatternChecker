@@ -102,6 +102,7 @@
   "patternchecker.issue.processing.noRecipe": "No machine recipe found that turns the inputs into this output (may rely on mod-specific machine logic)",
   "patternchecker.verdict.craftable": "Craftable (recipe exists)",
   "patternchecker.verdict.processing.recipe": "Producible (matching machine recipe found)",
+  "patternchecker.verdict.processing.unknown": "Machine recipe not verified (may depend on persistent inputs or mod-specific logic)",
   "patternchecker.verdict.processing.fluid": "Producible (involves fluids; machine recipe not checked)",
   "patternchecker.verdict.processing.noTarget": "Not producible (the pattern provider has no machine target)",
   "patternchecker.verdict.processing.wrongMachine": "Not producible (the recipe does not match the machine facing the provider)",

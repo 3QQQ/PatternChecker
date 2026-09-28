@@ -145,6 +145,7 @@ public final class PatternScanner {
                                 boolean universalRecipeExecutor,
                                 boolean knownNonProcessingTarget,
                                 boolean unknownAddonTarget,
+                                boolean contextualMagicTarget,
                                 Set<String> machineIds,
                                 Set<String> targetBlockIds) {
     }
@@ -562,7 +563,8 @@ public final class PatternScanner {
                 logMachineMismatch(host, pos, details, result, context);
             }
             String verdictKey = switch (result) {
-                case MATCH, UNKNOWN -> "patternchecker.verdict.processing.recipe";
+                case MATCH -> "patternchecker.verdict.processing.recipe";
+                case UNKNOWN -> "patternchecker.verdict.processing.unknown";
                 case NO_TARGET -> "patternchecker.verdict.processing.noTarget";
                 case WRONG_MACHINE -> "patternchecker.verdict.processing.wrongMachine";
                 case NO_RECIPE -> "patternchecker.verdict.processing.noRecipe";
@@ -1533,6 +1535,19 @@ public final class PatternScanner {
         if (typeId.equals("jdte:bio_factory")) {
             return bioFactoryRequirements(recipe);
         }
+        if (typeId.equals("mysticalagriculture:infusion")
+                || typeId.equals("mysticalagriculture:awakening")) {
+            // Mystical Agriculture keeps the central altar input separate
+            // from Recipe#getIngredients(). Awakening also consumes counted
+            // essences; omitting either would accept an incomplete pattern.
+            List<RecipeRequirement> requirements = genericRecipeRequirements(recipe);
+            addRecipeRequirements(requirements,
+                    firstMember(recipe, "getAltarIngredient", "altarIngredient"));
+            if (typeId.equals("mysticalagriculture:awakening")) {
+                addRecipeRequirements(requirements, firstMember(recipe, "getEssences", "essences"));
+            }
+            return requirements;
+        }
         return switch (recipeNamespace(recipe)) {
             case "mekanism" -> recipeRequirementsFromMembers(recipe,
                     aliases("getInput", "input"),
@@ -1978,6 +1993,7 @@ public final class PatternScanner {
             return ProcessingMachineResult.WRONG_MACHINE;
         }
         if (machine.knownNonProcessingTarget() && !machine.unknownAddonTarget()
+                && !machine.contextualMagicTarget()
                 && types.isEmpty()) {
             return ProcessingMachineResult.WRONG_MACHINE;
         }
@@ -1999,6 +2015,11 @@ public final class PatternScanner {
                     return ProcessingMachineResult.MATCH;
                 }
             }
+            // A second target may still be a contextual magic machine even
+            // when another adjacent machine has a known recipe type.
+            if (machine.contextualMagicTarget()) {
+                return ProcessingMachineResult.UNKNOWN;
+            }
             boolean recipeExists = hasMatchingMachineRecipe(
                     level, details, null, null, context);
             // The inputs/outputs form a valid machine recipe, but not for the
@@ -2013,10 +2034,12 @@ public final class PatternScanner {
                     : ProcessingMachineResult.NO_RECIPE;
         }
 
-        // An unknown execution target only makes the machine assignment
-        // uncertain. It must not make an item-only processing pattern immune
-        // to the global "does this recipe still exist?" validity check.
-        return hasMatchingMachineRecipe(level, details, null, null, context)
+        // Released Mekanism Magic and several Mystical Automation machines
+        // need persistent context or create dynamic outputs. Their recipes
+        // cannot be judged by the generic output index. Other unknown targets
+        // still use the global recipe check below.
+        return machine.contextualMagicTarget()
+                || hasMatchingMachineRecipe(level, details, null, null, context)
                 || hasNonItemIO(details)
                 ? ProcessingMachineResult.UNKNOWN
                 : ProcessingMachineResult.NO_RECIPE;
@@ -2210,6 +2233,7 @@ public final class PatternScanner {
         boolean universalRecipeExecutor = false;
         boolean knownNonProcessingTarget = false;
         boolean unknownAddonTarget = false;
+        boolean contextualMagicTarget = false;
         Set<String> machineIds = new HashSet<>();
         Set<String> targetBlockIds = new HashSet<>();
 
@@ -2224,8 +2248,10 @@ public final class PatternScanner {
             craftingOnly |= isCraftingOnlyBlock(block);
             crystalGrowthChamber |= isCrystalGrowthChamber(block);
             universalRecipeExecutor |= isAe2LtUniversalRecipeExecutor(block);
-            knownNonProcessingTarget |= isAe2LtNonProcessingTarget(block);
+            knownNonProcessingTarget |= isAe2LtNonProcessingTarget(block)
+                    || isMagicNonProcessingTarget(block);
             unknownAddonTarget |= isUnknownAddonMachine(block);
+            contextualMagicTarget |= isContextualMagicTarget(block);
         }
 
         if (host != null && pos != null) {
@@ -2236,11 +2262,20 @@ public final class PatternScanner {
                     hasTarget = true;
                     addTargetBlockId(block, targetBlockIds);
                 }
-                addMachineType(block, types);
+                boolean inputFace = !isMysticalAutomationInputMachine(block)
+                        || direction == Direction.DOWN;
+                if (inputFace) {
+                    addMachineType(block, types);
+                    contextualMagicTarget |= isContextualMagicTarget(block);
+                } else {
+                    // Mystical Automation accepts recipe items from above only.
+                    knownNonProcessingTarget = true;
+                }
                 craftingOnly |= isCraftingOnlyBlock(block);
                 crystalGrowthChamber |= isCrystalGrowthChamber(block);
                 universalRecipeExecutor |= isAe2LtUniversalRecipeExecutor(block);
-                knownNonProcessingTarget |= isAe2LtNonProcessingTarget(block);
+                knownNonProcessingTarget |= isAe2LtNonProcessingTarget(block)
+                        || isMagicNonProcessingTarget(block);
                 unknownAddonTarget |= isUnknownAddonMachine(block);
                 addMmrMachineId(level, target, machineIds);
                 ICraftingMachine machine = ICraftingMachine.of(level, pos, direction);
@@ -2258,11 +2293,19 @@ public final class PatternScanner {
                 if (!level.getBlockState(target).isAir()) {
                     addTargetBlockId(targetBlock, targetBlockIds);
                 }
-                addMachineType(targetBlock, types);
+                if (isMysticalAutomationInputMachine(targetBlock)) {
+                    // A wireless receiver's target position has no known
+                    // insertion face, so do not certify a top-only machine.
+                    contextualMagicTarget = true;
+                } else {
+                    addMachineType(targetBlock, types);
+                    contextualMagicTarget |= isContextualMagicTarget(targetBlock);
+                }
                 craftingOnly |= isCraftingOnlyBlock(targetBlock);
                 crystalGrowthChamber |= isCrystalGrowthChamber(targetBlock);
                 universalRecipeExecutor |= isAe2LtUniversalRecipeExecutor(targetBlock);
-                knownNonProcessingTarget |= isAe2LtNonProcessingTarget(targetBlock);
+                knownNonProcessingTarget |= isAe2LtNonProcessingTarget(targetBlock)
+                        || isMagicNonProcessingTarget(targetBlock);
                 unknownAddonTarget |= isUnknownAddonMachine(targetBlock);
                 addMmrMachineId(level, target, machineIds);
                 for (Direction direction : Direction.values()) {
@@ -2271,11 +2314,19 @@ public final class PatternScanner {
                     if (!level.getBlockState(adjacentPos).isAir()) {
                         addTargetBlockId(adjacent, targetBlockIds);
                     }
-                    addMachineType(adjacent, types);
+                    boolean inputFace = !isMysticalAutomationInputMachine(adjacent)
+                            || direction == Direction.DOWN;
+                    if (inputFace) {
+                        addMachineType(adjacent, types);
+                        contextualMagicTarget |= isContextualMagicTarget(adjacent);
+                    } else {
+                        knownNonProcessingTarget = true;
+                    }
                     craftingOnly |= isCraftingOnlyBlock(adjacent);
                     crystalGrowthChamber |= isCrystalGrowthChamber(adjacent);
                     universalRecipeExecutor |= isAe2LtUniversalRecipeExecutor(adjacent);
-                    knownNonProcessingTarget |= isAe2LtNonProcessingTarget(adjacent);
+                    knownNonProcessingTarget |= isAe2LtNonProcessingTarget(adjacent)
+                            || isMagicNonProcessingTarget(adjacent);
                     unknownAddonTarget |= isUnknownAddonMachine(adjacent);
                     addMmrMachineId(level, adjacentPos, machineIds);
                     ICraftingMachine machine = ICraftingMachine.of(level, target, direction);
@@ -2287,7 +2338,8 @@ public final class PatternScanner {
         }
         return new MachineState(types, hasTarget, craftingOnly, acceptsPlans,
                 crystalGrowthChamber, universalRecipeExecutor,
-                knownNonProcessingTarget, unknownAddonTarget, Set.copyOf(machineIds),
+                knownNonProcessingTarget, unknownAddonTarget, contextualMagicTarget,
+                Set.copyOf(machineIds),
                 Set.copyOf(targetBlockIds));
     }
 
@@ -2407,6 +2459,46 @@ public final class PatternScanner {
                     "matter_warping_matrix_controller" -> true;
             default -> false;
         };
+    }
+
+    private static boolean isMagicNonProcessingTarget(Block block) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
+        if (id.getNamespace().equals("mysticalautomation")) {
+            return id.getPath().equals("fertilizer");
+        }
+        if (!id.getNamespace().equals("mekanism_magic")) {
+            return false;
+        }
+        return switch (id.getPath()) {
+            case "dimension_miner", "drygmy_simulator", "source_generator",
+                    "source_converter", "magic_source_pipe" -> true;
+            default -> id.getPath().endsWith("_magic_source_pipe");
+        };
+    }
+
+    private static boolean isMysticalAutomationInputMachine(Block block) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
+        if (!id.getNamespace().equals("mysticalautomation")) {
+            return false;
+        }
+        return switch (id.getPath()) {
+            case "crafter", "farmer", "infuser", "infusion_altarnator",
+                    "awakening_altarnator", "enchanternator" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isContextualMagicTarget(Block block) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
+        if (id.getNamespace().equals("mysticalautomation")) {
+            return switch (id.getPath()) {
+                case "crafter", "farmer", "infuser", "enchanternator" -> true;
+                default -> false;
+            };
+        }
+        return id.getNamespace().equals("mekanism_magic")
+                && (id.getPath().equals("catalyst_identifier_assembler")
+                || isMekMagicPatternTarget(id.getPath()));
     }
 
     private static boolean isCrystalGrowthChamber(Block block) {
@@ -2614,6 +2706,10 @@ public final class PatternScanner {
             return List.of(MMR_RECIPE_TYPE);
         }
         return switch (id) {
+            case "mysticalautomation:infusion_altarnator" ->
+                    List.of("mysticalagriculture:infusion");
+            case "mysticalautomation:awakening_altarnator" ->
+                    List.of("mysticalagriculture:awakening");
             case "ae2:charger", "extendedae:ex_charger" ->
                     List.of("ae2:charger");
             case "ae2:inscriber", "extendedae:ex_inscriber" ->
@@ -2693,6 +2789,33 @@ public final class PatternScanner {
             case "productivebees:bottler" ->
                     List.of("productivebees:bottler");
             default -> List.of();
+        };
+    }
+
+    private static boolean isMekMagicPatternTarget(String path) {
+        if (path.equals("spirit_processor") || isMekMagicFactory(path, "spirit")) {
+            return true;
+        }
+        if (path.equals("imbuement_processor") || isMekMagicFactory(path, "imbuement")) {
+            return true;
+        }
+        return switch (path) {
+            case "ritual_engine", "mini_ritual_assembler",
+                    "enchanting_apparatus_processor" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isMekMagicFactory(String path, String process) {
+        String suffix = "_" + process + "_factory";
+        if (!path.endsWith(suffix)) {
+            return false;
+        }
+        String tier = path.substring(0, path.length() - suffix.length());
+        return switch (tier) {
+            case "basic", "advanced", "elite", "ultimate", "absolute", "supreme",
+                    "cosmic", "infinite" -> true;
+            default -> false;
         };
     }
 
