@@ -702,7 +702,8 @@ public final class PatternScanner {
                 logMachineMismatch(host, pos, details, result, context);
             }
             String verdictKey = switch (result) {
-                case MATCH, UNKNOWN -> "patternchecker.verdict.processing.recipe";
+                case MATCH -> "patternchecker.verdict.processing.recipe";
+                case UNKNOWN -> "patternchecker.verdict.processing.unknown";
                 case NO_TARGET -> "patternchecker.verdict.processing.noTarget";
                 case WRONG_MACHINE -> "patternchecker.verdict.processing.wrongMachine";
                 case NO_RECIPE -> "patternchecker.verdict.processing.noRecipe";
@@ -2315,6 +2316,10 @@ public final class PatternScanner {
         Set<RecipeType<?>> types = machine.types();
         boolean hasTarget = machine.hasTarget();
         boolean craftingOnly = machine.craftingOnly();
+        boolean mekanismMagicPatternTarget = machine.targetBlockIds().stream()
+                .anyMatch(PatternScanner::isMekanismMagicPatternTarget);
+        boolean mekanismMagicMinerTarget = machine.targetBlockIds().contains(
+                "mekanism_magic:dimension_miner");
 
         if (!hasTarget) {
             return ProcessingMachineResult.NO_TARGET;
@@ -2333,6 +2338,19 @@ public final class PatternScanner {
         }
         if (machine.crystalGrowthChamber() && types.isEmpty()) {
             return ProcessingMachineResult.NO_RECIPE;
+        }
+        // Mekanism Magic 1.0.4 executes Occultism recipes using a persistent
+        // spirit, ritual selector, or pentacle context. Its outputs may also
+        // be generated from recipe data rather than Recipe#getResultItem().
+        // The released API has no exact pattern validator, so the vanilla
+        // recipe index cannot safely declare these patterns invalid.
+        if (mekanismMagicPatternTarget && types.isEmpty()) {
+            return ProcessingMachineResult.UNKNOWN;
+        }
+        // The dimensional miner returns random outputs directly to storage;
+        // it explicitly does not accept processing patterns.
+        if (mekanismMagicMinerTarget && types.isEmpty()) {
+            return ProcessingMachineResult.WRONG_MACHINE;
         }
         // Molecular assemblers accept AE2 crafting plans, but processing
         // patterns are not crafting recipes and can never run in them.
@@ -2361,6 +2379,9 @@ public final class PatternScanner {
                     return ProcessingMachineResult.MATCH;
                 }
             }
+            if (mekanismMagicPatternTarget) {
+                return ProcessingMachineResult.UNKNOWN;
+            }
             boolean recipeExists = hasMatchingMachineRecipe(
                     level, details, null, null, context);
             // The inputs/outputs form a valid machine recipe, but not for the
@@ -2382,6 +2403,24 @@ public final class PatternScanner {
                 || hasNonItemIO(details)
                 ? ProcessingMachineResult.UNKNOWN
                 : ProcessingMachineResult.NO_RECIPE;
+    }
+
+    /** Processing machines present in Mekanism Magic's Forge 1.20.1 v1.0.4 release. */
+    private static boolean isMekanismMagicPatternTarget(String blockId) {
+        return switch (blockId) {
+            case "mekanism_magic:spirit_processor",
+                    "mekanism_magic:basic_spirit_factory",
+                    "mekanism_magic:advanced_spirit_factory",
+                    "mekanism_magic:elite_spirit_factory",
+                    "mekanism_magic:ultimate_spirit_factory",
+                    "mekanism_magic:absolute_spirit_factory",
+                    "mekanism_magic:supreme_spirit_factory",
+                    "mekanism_magic:cosmic_spirit_factory",
+                    "mekanism_magic:infinite_spirit_factory",
+                    "mekanism_magic:ritual_engine",
+                    "mekanism_magic:mini_ritual_assembler" -> true;
+            default -> false;
+        };
     }
 
     /**
