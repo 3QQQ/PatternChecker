@@ -21,5 +21,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Fetch AE2 build dependency
+        run: |
+          mkdir -p libs
+          curl --fail --location --retry 3 \
+            --output libs/appliedenergistics2-19.2.17.jar \
+            https://repo.maven.apache.org/maven2/org/appliedenergistics/appliedenergistics2/19.2.17/appliedenergistics2-19.2.17.jar
+          echo '460d779a0609b81409907d9956de8f6f70a1b0912257e3e5c3c7e75ac9630e95  libs/appliedenergistics2-19.2.17.jar' | sha256sum --check
+
       - name: Build with Gradle
         run: ./gradlew build
