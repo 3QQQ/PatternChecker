@@ -1,4 +1,5 @@
 {
+  "patternchecker.issue.input.unchecked": "未连接 ME 网络，无法检查原料是否可取得",
   "item.patternchecker.pattern_checker_tool": "样板检测工具",
   "item.patternchecker.pattern_checker_tool.tooltip": "饰品或检查工具：放在背包/饰品栏时为 AE2 编码终端添加可拖动检查模块；右键仅打开检查界面。",
   "patternchecker.menu.title": "样板检查",

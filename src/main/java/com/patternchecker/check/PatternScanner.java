@@ -158,7 +158,6 @@ public final class PatternScanner {
      * entire registry once per pattern causes a visible server-tick stall.
      */
     private static final class ScanContext {
-        private final Level level;
         private final Map<IGrid, GridState> gridStates = new IdentityHashMap<>();
         private final Map<Object, MachineState> machineStates = new IdentityHashMap<>();
         private final RecipeIndex recipeIndex;
@@ -167,7 +166,6 @@ public final class PatternScanner {
                 new IdentityHashMap<>();
         private final Set<String> loggedMachineMismatches = new HashSet<>();
         private ScanContext(Level level) {
-            this.level = level;
             this.recipeIndex = recipeIndex(level);
         }
 
@@ -183,7 +181,7 @@ public final class PatternScanner {
             return recipeIndex.machineRecipesByOutput.getOrDefault(identifier, List.of());
         }
 
-        private MachineState machineState(Object host, BlockPos pos) {
+        private MachineState machineState(Object host, Level level, BlockPos pos) {
             return machineStates.computeIfAbsent(host, ignored -> buildMachineState(host, level, pos));
         }
     }
@@ -385,10 +383,13 @@ public final class PatternScanner {
         if (inv == null || be == null) {
             return;
         }
+        // A grid can span dimensions. Resolve targets and decode patterns in
+        // the container's world rather than the world where the scan began.
+        Level providerLevel = be.getLevel() != null ? be.getLevel() : level;
         // Wireless containers (AE2LT overloaded providers) belong to the main
         // network they connect to, not to their own (possibly empty) grid.
         IGrid checkGrid = grid;
-        if (level instanceof ServerLevel serverLevel) {
+        if (providerLevel instanceof ServerLevel serverLevel) {
             IGrid resolved = WirelessHelper.resolveGrid(serverLevel, owner);
             if (resolved != null) {
                 checkGrid = resolved;
@@ -396,7 +397,7 @@ public final class PatternScanner {
         }
         BlockPos pos = be.getBlockPos();
         boolean provider = isPatternProviderHost(owner);
-        String location = describeContainer(owner, be, level, provider, pos);
+        String location = describeContainer(owner, be, providerLevel, provider, pos);
         Map<AEItemKey, List<IPatternDetails>> providerDetails = new HashMap<>();
         if (owner instanceof PatternProviderLogicHost host) {
             try {
@@ -427,7 +428,7 @@ public final class PatternScanner {
             if (matchingDetails != null && !matchingDetails.isEmpty()) {
                 providerDetail = matchingDetails.remove(0);
             }
-            check(stack, providerDetail, checkGrid, level, location, pos, slot,
+            check(stack, providerDetail, checkGrid, providerLevel, location, pos, slot,
                     provider ? owner : null,
                     issues, verdicts, patterns, duplicateCandidates,
                     inputIssueCandidates, scannedCraftingOutputs, 1, context);
@@ -699,7 +700,7 @@ public final class PatternScanner {
             ProcessingMachineResult result = checkProcessingMachine(host, level, pos, details, context);
             if (result == ProcessingMachineResult.NO_RECIPE
                     || result == ProcessingMachineResult.WRONG_MACHINE) {
-                logMachineMismatch(host, pos, details, result, context);
+                logMachineMismatch(host, level, pos, details, result, context);
             }
             String verdictKey = switch (result) {
                 case MATCH -> "patternchecker.verdict.processing.recipe";
@@ -725,14 +726,21 @@ public final class PatternScanner {
         }
 
         // Check that every input is stocked on the network or craftable.
-        GridState gridState = context.gridState(grid);
-        KeyCounter stored = gridState.stored();
-        ICraftingService crafting = gridState.crafting();
+        GridState gridState = grid != null ? context.gridState(grid) : null;
+        KeyCounter stored = gridState != null ? gridState.stored() : null;
+        ICraftingService crafting = gridState != null ? gridState.crafting() : null;
+        if (gridState == null) {
+            issues.add(new PatternIssue(PatternIssue.Type.WARNING, PatternIssue.Category.INPUT,
+                    message("patternchecker.issue.input.unchecked", patternName, location, null), pos, location));
+        }
         for (IPatternDetails.IInput input : details.getInputs()) {
             GenericStack[] possible = input.getPossibleInputs();
             if (possible == null || possible.length == 0) {
                 issues.add(new PatternIssue(PatternIssue.Type.WARNING, PatternIssue.Category.INPUT,
                         message("patternchecker.issue.input.empty", patternName, location, null), pos, location));
+                continue;
+            }
+            if (gridState == null) {
                 continue;
             }
 
@@ -905,12 +913,14 @@ public final class PatternScanner {
     }
 
     private static int saturatedAdd(int value, long amount) {
-        return (int) Math.min(Integer.MAX_VALUE, (long) value + Math.max(0L, amount));
+        long positiveAmount = Math.max(0L, amount);
+        return positiveAmount > (long) Integer.MAX_VALUE - value
+                ? Integer.MAX_VALUE : (int) ((long) value + positiveAmount);
     }
 
     private static long saturatedAdd(long value, long amount) {
         long positiveAmount = Math.max(0L, amount);
-        return Long.MAX_VALUE - value < positiveAmount ? Long.MAX_VALUE : value + positiveAmount;
+        return value > Long.MAX_VALUE - positiveAmount ? Long.MAX_VALUE : value + positiveAmount;
     }
 
     private static Component describeOutputs(IPatternDetails details) {
@@ -1289,23 +1299,24 @@ public final class PatternScanner {
         }
     }
 
-    private static void logMachineMismatch(Object host, BlockPos pos, IPatternDetails details,
+    private static void logMachineMismatch(Object host, Level level, BlockPos pos, IPatternDetails details,
                                            ProcessingMachineResult result, ScanContext context) {
         if (host == null || pos == null) {
             return;
         }
-        String diagnosticKey = pos.asLong() + ":" + result + ":" + duplicateSignature(details);
+        String dimension = level != null ? level.dimension().location().toString() : "unknown";
+        String diagnosticKey = dimension + ":" + pos.asLong() + ":" + result + ":" + duplicateSignature(details);
         if (!context.loggedMachineMismatches.add(diagnosticKey)) {
             return;
         }
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         List<String> recipeTypes = machine.types().stream()
                 .map(PatternScanner::recipeTypeId)
                 .sorted()
                 .toList();
         PatternCheckerMod.LOGGER.info(
-                "Pattern validation {} at provider {}: targets={}, recipeTypes={}, mmrMachines={}, inputs={}, outputs={}",
-                result, pos.toShortString(), machine.targetBlockIds(), recipeTypes,
+                "Pattern validation {} at provider {} in {}: targets={}, recipeTypes={}, mmrMachines={}, inputs={}, outputs={}",
+                result, pos.toShortString(), dimension, machine.targetBlockIds(), recipeTypes,
                 machine.machineIds(), describePatternInputsForLog(details),
                 describePatternOutputsForLog(details));
     }
@@ -2312,7 +2323,7 @@ public final class PatternScanner {
             return checkAe2LtPackagedProvider(host, level, pos, details, context);
         }
 
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         Set<RecipeType<?>> types = machine.types();
         boolean hasTarget = machine.hasTarget();
         boolean craftingOnly = machine.craftingOnly();

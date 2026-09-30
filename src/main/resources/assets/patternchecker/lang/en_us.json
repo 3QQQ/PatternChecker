@@ -1,4 +1,5 @@
 {
+  "patternchecker.issue.input.unchecked": "No connected ME network; input availability could not be checked",
   "item.patternchecker.pattern_checker_tool": "Pattern Checker",
   "item.patternchecker.pattern_checker_tool.tooltip": "Accessory/checker: keep it in your inventory or accessory slot to add a draggable module to AE2 encoding terminals; right-click only opens the checker.",
   "patternchecker.menu.title": "Pattern Checker",
