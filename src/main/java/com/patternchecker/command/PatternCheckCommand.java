@@ -185,6 +185,7 @@ public final class PatternCheckCommand {
         int totalProviderPatterns = 0;
         int totalContainerPatterns = 0;
         int totalStoragePatterns = 0;
+        int totalVirtualCraftingPatterns = 0;
         int totalErrors = 0;
         int totalWarnings = 0;
 
@@ -196,6 +197,7 @@ public final class PatternCheckCommand {
             totalProviderPatterns += result.providerPatterns();
             totalContainerPatterns += result.containerPatterns();
             totalStoragePatterns += result.storagePatterns();
+            totalVirtualCraftingPatterns += result.virtualCraftingPatterns();
             int[] counts = PatternScanner.visibleCounts(result, showInput, showDuplicates);
             totalErrors += counts[0];
             totalWarnings += counts[1];
@@ -204,6 +206,7 @@ public final class PatternCheckCommand {
                 source.sendSuccess(() -> Component.translatable("patternchecker.msg.networkHeader",
                         currentNetwork, result.totalPatterns(), result.providerPatterns(),
                         result.containerPatterns(), result.storagePatterns(),
+                        result.virtualCraftingPatterns(),
                         counts[0], counts[1]), false);
             }
             if (!silent) {
@@ -230,14 +233,17 @@ public final class PatternCheckCommand {
         int providerPatterns = totalProviderPatterns;
         int containerPatterns = totalContainerPatterns;
         int storagePatterns = totalStoragePatterns;
+        int virtualCraftingPatterns = totalVirtualCraftingPatterns;
         int errors = totalErrors;
         int warnings = totalWarnings;
         if (silent) {
             HighlightManager.setNotice(player.getUUID(),
-                    Component.translatable("patternchecker.msg.scanDone", patterns, errors, warnings));
+                    Component.translatable("patternchecker.msg.scanDone",
+                            patterns, virtualCraftingPatterns, errors, warnings));
         } else {
             source.sendSuccess(() -> Component.translatable("patternchecker.msg.header",
-                    patterns, providerPatterns, containerPatterns, storagePatterns, errors, warnings), false);
+                    patterns, providerPatterns, containerPatterns, storagePatterns,
+                    virtualCraftingPatterns, errors, warnings), false);
             if (patterns == 0 && errors + warnings == 0) {
                 source.sendSuccess(() -> Component.translatable("patternchecker.msg.noPatternsHint"), false);
             }

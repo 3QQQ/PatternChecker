@@ -18,8 +18,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.RenderTooltipEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -50,6 +52,7 @@ public final class PatternTerminalEvents {
     private static int persistedSelectionRow = -1;
     private static String persistedBoundLabel = "";
     private static boolean terminalPanelEnabled = true;
+    private static boolean renderingPanelOverlay;
 
     private record EntryKey(String location, int slot) {
     }
@@ -181,11 +184,26 @@ public final class PatternTerminalEvents {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onScreenRender(ScreenEvent.Render.Post event) {
         if (event.getScreen() == activeScreen && activePanel != null) {
-            activePanel.renderOverlay(
-                    event.getGuiGraphics(), event.getMouseX(), event.getMouseY(), event.getPartialTick());
+            renderingPanelOverlay = true;
+            try {
+                activePanel.renderOverlay(
+                        event.getGuiGraphics(), event.getMouseX(), event.getMouseY(), event.getPartialTick());
+            } finally {
+                renderingPanelOverlay = false;
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRenderTooltip(RenderTooltipEvent.Pre event) {
+        if (!renderingPanelOverlay
+                && Minecraft.getInstance().screen == activeScreen
+                && activePanel != null
+                && activePanel.blocksUnderlyingHover(event.getX(), event.getY())) {
+            event.setCanceled(true);
         }
     }
 
@@ -370,6 +388,10 @@ public final class PatternTerminalEvents {
         private boolean isInside(double mouseX, double mouseY) {
             return mouseX >= getX() && mouseX < getX() + getWidth()
                     && mouseY >= getY() && mouseY < getY() + getHeight();
+        }
+
+        private boolean blocksUnderlyingHover(double mouseX, double mouseY) {
+            return PatternCheckClient.getToolList().available() && isInside(mouseX, mouseY);
         }
 
         @Override
@@ -1056,21 +1078,22 @@ public final class PatternTerminalEvents {
                     minecraft().font.plainSubstrByWidth(status.getString(), maxWidth),
                     x, y, payload.bound() ? ACCENT_COLOR : DIM_TEXT_COLOR, false);
 
-            String secondLine;
-            int secondLineColor;
             if (!payload.notice().getString().isEmpty()) {
-                secondLine = payload.notice().getString();
-                secondLineColor = ACCENT_COLOR;
+                List<FormattedCharSequence> noticeLines =
+                        minecraft().font.split(payload.notice(), maxWidth);
+                for (int i = 0; i < Math.min(2, noticeLines.size()); i++) {
+                    gui.drawString(minecraft().font, noticeLines.get(i),
+                            x, y + 10 + i * 10, ACCENT_COLOR, false);
+                }
             } else {
                 ToolListPayload.Entry selected = selectedEntry();
-                secondLine = selected != null
+                String secondLine = selected != null
                         ? Component.translatable("patternchecker.menu.hoverHint").getString()
                         : Component.translatable("patternchecker.menu.selectHint").getString();
-                secondLineColor = DIM_TEXT_COLOR;
+                gui.drawString(minecraft().font,
+                        minecraft().font.plainSubstrByWidth(secondLine, maxWidth),
+                        x, y + 10, DIM_TEXT_COLOR, false);
             }
-            gui.drawString(minecraft().font,
-                    minecraft().font.plainSubstrByWidth(secondLine, maxWidth),
-                    x, y + 10, secondLineColor, false);
         }
 
         private ItemStack iconFor(String itemId) {

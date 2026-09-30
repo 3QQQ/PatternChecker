@@ -89,6 +89,20 @@ public final class PatternScanner {
             "es.degrassi.mmreborn.api.controller.IMultiblockController";
     private static final String MMR_RECIPE_TYPE =
             "modular_machinery_reborn:machine_recipe";
+    private static final List<String> IMMERSIVE_ENGINEERING_PROCESSING_TYPES = List.of(
+            "immersiveengineering:alloy",
+            "immersiveengineering:arc_furnace",
+            "immersiveengineering:blast_furnace",
+            "immersiveengineering:blueprint",
+            "immersiveengineering:bottling_machine",
+            "immersiveengineering:coke_oven",
+            "immersiveengineering:crusher",
+            "immersiveengineering:fermenter",
+            "immersiveengineering:metal_press",
+            "immersiveengineering:mixer",
+            "immersiveengineering:refinery",
+            "immersiveengineering:sawmill",
+            "immersiveengineering:squeezer");
 
     @FunctionalInterface
     private interface MemberAccessor {
@@ -132,7 +146,10 @@ public final class PatternScanner {
 
     private record PreparedRecipe(RecipeType<?> type, List<RecipeRequirement> requirements,
                                   List<RecipeOutput> outputs, String machineId,
-                                  boolean requireAllOutputs) {
+                                  boolean requireAllOutputs,
+                                  boolean dynamicOutputAmount,
+                                  List<RecipeRequirement> reusableRequirements,
+                                  List<RecipeRequirement> consumableRequirements) {
     }
 
     private record RecipeMatchKey(DuplicateSignature signature, RecipeType<?> onlyType,
@@ -204,7 +221,10 @@ public final class PatternScanner {
                                     : mmrRecipe.requirements()),
                             outputs,
                             mmrRecipe == null ? null : mmrRecipe.machineId(),
-                            requiresAllRecipeOutputs(recipe));
+                            requiresAllRecipeOutputs(recipe),
+                            hasDynamicOutputAmount(recipe),
+                            reusableRecipeRequirements(recipe),
+                            consumableRecipeRequirements(recipe));
                     Set<String> indexedOutputs = new HashSet<>();
                     for (RecipeOutput output : outputs) {
                         if (output.identifier() != null && indexedOutputs.add(output.identifier())) {
@@ -218,12 +238,14 @@ public final class PatternScanner {
             return machineRecipesByOutput.getOrDefault(identifier, List.of());
         }
 
-        private MachineState machineState(Object host, BlockPos pos) {
-            return machineStates.computeIfAbsent(host, ignored -> buildMachineState(host, level, pos));
+        private MachineState machineState(Object host, Level providerLevel, BlockPos pos) {
+            return machineStates.computeIfAbsent(
+                    host, ignored -> buildMachineState(host, providerLevel, pos));
         }
     }
 
     public record ScanResult(int totalPatterns, int providerPatterns, int containerPatterns, int storagePatterns,
+                             int virtualCraftingPatterns,
                              List<Component> verdicts, List<ScannedPattern> patterns, List<PatternIssue> issues) {
         public int errorCount() {
             return (int) issues.stream().filter(i -> i.type() == PatternIssue.Type.ERROR).count();
@@ -245,7 +267,7 @@ public final class PatternScanner {
         List<DuplicateCandidate> duplicateCandidates = new ArrayList<>();
         List<InputIssueCandidate> inputIssueCandidates = new ArrayList<>();
         Set<AEKey> scannedCraftingOutputs = new HashSet<>();
-        int[] totals = new int[3]; // total, provider, container
+        int[] totals = new int[4]; // total, provider, container, virtual crafting
         int storagePatterns = 0;
 
         // Canonical AE2 API: every pattern-holding grid machine implements
@@ -285,7 +307,8 @@ public final class PatternScanner {
 
         removeCraftableInputIssues(inputIssueCandidates, scannedCraftingOutputs, issues, level);
         markDuplicatePatterns(duplicateCandidates, issues);
-        return new ScanResult(totals[0], totals[1], totals[2], storagePatterns, verdicts, patterns, issues);
+        return new ScanResult(totals[0], totals[1], totals[2], storagePatterns, totals[3],
+                verdicts, patterns, issues);
     }
 
     /**
@@ -301,7 +324,7 @@ public final class PatternScanner {
         List<DuplicateCandidate> duplicateCandidates = new ArrayList<>();
         List<InputIssueCandidate> inputIssueCandidates = new ArrayList<>();
         Set<AEKey> scannedCraftingOutputs = new HashSet<>();
-        int[] totals = new int[3];
+        int[] totals = new int[4];
         IGrid context = null;
         if (level instanceof ServerLevel serverLevel) {
             context = WirelessHelper.resolveGrid(serverLevel, be);
@@ -310,7 +333,8 @@ public final class PatternScanner {
                 duplicateCandidates, inputIssueCandidates, scannedCraftingOutputs, totals, scanContext);
         removeCraftableInputIssues(inputIssueCandidates, scannedCraftingOutputs, issues, level);
         markDuplicatePatterns(duplicateCandidates, issues);
-        return new ScanResult(totals[0], totals[1], totals[2], 0, verdicts, patterns, issues);
+        return new ScanResult(totals[0], totals[1], totals[2], 0, totals[3],
+                verdicts, patterns, issues);
     }
 
     private static void scanPatternInventory(Object owner, IGrid grid, Level level,
@@ -325,17 +349,21 @@ public final class PatternScanner {
         if (inv == null || be == null) {
             return;
         }
+        Level providerLevel = be.getLevel() != null ? be.getLevel() : level;
+        boolean provider = isPatternProviderHost(owner);
+        // Virtual completion changes output waiting, not the prerequisites for
+        // dispatch. Keep decoding, target, stock and duplicate checks per slot.
+        boolean virtualCrafting = provider && isVirtualCraftingProvider(owner);
         // Wireless containers (AE2LT overloaded providers) belong to the main
         // network they connect to, not to their own (possibly empty) grid.
         IGrid checkGrid = grid;
-        if (level instanceof ServerLevel serverLevel) {
+        if (providerLevel instanceof ServerLevel serverLevel) {
             IGrid resolved = WirelessHelper.resolveGrid(serverLevel, owner);
             if (resolved != null) {
                 checkGrid = resolved;
             }
         }
         BlockPos pos = be.getBlockPos();
-        boolean provider = isPatternProviderHost(owner);
         String location = describeContainer(owner, be, provider, pos);
         Map<AEItemKey, List<IPatternDetails>> providerDetails = new HashMap<>();
         if (owner instanceof PatternProviderLogicHost host) {
@@ -359,6 +387,9 @@ public final class PatternScanner {
             totals[0]++;
             if (provider) {
                 totals[1]++;
+                if (virtualCrafting) {
+                    totals[3]++;
+                }
             } else {
                 totals[2]++;
             }
@@ -367,7 +398,7 @@ public final class PatternScanner {
             if (matchingDetails != null && !matchingDetails.isEmpty()) {
                 providerDetail = matchingDetails.removeFirst();
             }
-            check(stack, providerDetail, checkGrid, level, location, pos, slot,
+            check(stack, providerDetail, checkGrid, providerLevel, location, pos, slot,
                     provider ? owner : null,
                     issues, verdicts, patterns, duplicateCandidates,
                     inputIssueCandidates, scannedCraftingOutputs, 1, context);
@@ -421,6 +452,36 @@ public final class PatternScanner {
                 || isMekEnergisticsMachine(owner)
                 || isAe2LtMatrixPort(owner)
                 || isAe2LtPigmeePatternProvider(owner);
+    }
+
+    private static boolean isVirtualCraftingProvider(Object owner) {
+        Object logic = owner instanceof PatternProviderLogicHost host
+                ? host.getLogic()
+                : readMember(owner, "getLogic");
+        if (Boolean.TRUE.equals(
+                readMember(logic, "eap$compatIsVirtualCraftingEnabled"))) {
+            return true;
+        }
+        // Released EA+ builds do not all expose the state bridge used by the
+        // current source tree. Reading the public upgrade inventory also
+        // avoids relying on the mixin's cached state having synchronized yet.
+        return containsVirtualCraftingCard(readMember(logic, "getUpgrades"))
+                || containsVirtualCraftingCard(readMember(logic, "eap$getCompatUpgrades"))
+                || containsVirtualCraftingCard(readMember(owner, "getUpgrades"));
+    }
+
+    private static boolean containsVirtualCraftingCard(Object inventory) {
+        if (!(inventory instanceof Iterable<?> iterable)) {
+            return false;
+        }
+        for (Object entry : iterable) {
+            if (entry instanceof ItemStack stack && !stack.isEmpty()
+                    && "extendedae_plus:virtual_crafting_card".equals(
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isMekEnergisticsMachine(Object owner) {
@@ -556,27 +617,48 @@ public final class PatternScanner {
         inputDesc = describeInputs(details);
 
         boolean processing = isProcessingPattern(details);
+        boolean virtualCrafting = host != null && isVirtualCraftingProvider(host);
         if (processing) {
-            ProcessingMachineResult result = checkProcessingMachine(host, level, pos, details, context);
+            ProcessingMachineResult result = virtualCrafting
+                    ? checkVirtualDispatchTarget(host, level, pos, details, true, context)
+                    : checkProcessingMachine(host, level, pos, details, context);
             if (result == ProcessingMachineResult.NO_RECIPE
                     || result == ProcessingMachineResult.WRONG_MACHINE) {
-                logMachineMismatch(host, pos, details, result, context);
+                logMachineMismatch(host, level, pos, details, result, context);
             }
             String verdictKey = switch (result) {
                 case MATCH -> "patternchecker.verdict.processing.recipe";
-                case UNKNOWN -> "patternchecker.verdict.processing.unknown";
+                case UNKNOWN -> virtualCrafting
+                        ? "patternchecker.verdict.processing.virtual"
+                        : "patternchecker.verdict.processing.unknown";
                 case NO_TARGET -> "patternchecker.verdict.processing.noTarget";
                 case WRONG_MACHINE -> "patternchecker.verdict.processing.wrongMachine";
                 case NO_RECIPE -> "patternchecker.verdict.processing.noRecipe";
             };
             verdicts.add(verdictLine(verdictKey, patternName, location, null));
-            checkProcessingPattern(details, patternName, location, pos, issues, result);
+            checkProcessingPattern(details, patternName, location, pos, issues, result,
+                    virtualCrafting || allowsReusableProcessingOutputs(level, details, context));
         } else {
-            addCraftingOutputs(details, scannedCraftingOutputs);
+            if (!virtualCrafting) {
+                addCraftingOutputs(details, scannedCraftingOutputs);
+            }
             // AE2 decoding verifies the encoded recipe with its actual matcher.
             // A second generic ingredient scan loses shapeless and fluid
             // substitution semantics and can falsely mark valid patterns broken.
-            verdicts.add(verdictLine("patternchecker.verdict.craftable", patternName, location, null));
+            if (virtualCrafting) {
+                ProcessingMachineResult result = checkVirtualDispatchTarget(
+                        host, level, pos, details, false, context);
+                String verdictKey = switch (result) {
+                    case NO_TARGET -> "patternchecker.verdict.processing.noTarget";
+                    case WRONG_MACHINE -> "patternchecker.verdict.processing.wrongMachine";
+                    case NO_RECIPE -> "patternchecker.verdict.processing.noRecipe";
+                    case MATCH, UNKNOWN -> "patternchecker.verdict.processing.virtual";
+                };
+                verdicts.add(verdictLine(verdictKey, patternName, location, null));
+                checkProcessingPattern(details, patternName, location, pos, issues, result, true);
+            } else {
+                verdicts.add(verdictLine("patternchecker.verdict.craftable", patternName, location, null));
+            }
 
         }
 
@@ -586,9 +668,11 @@ public final class PatternScanner {
         }
 
         // Check that every input is stocked on the network or craftable.
-        GridState gridState = context.gridState(grid);
-        KeyCounter stored = gridState.stored();
-        ICraftingService crafting = gridState.crafting();
+        GridState gridState = grid == null ? null : context.gridState(grid);
+        if (gridState == null) {
+            issues.add(new PatternIssue(PatternIssue.Type.WARNING, PatternIssue.Category.INPUT,
+                    message("patternchecker.issue.input.unchecked", patternName, location, null), pos, location));
+        }
         for (IPatternDetails.IInput input : details.getInputs()) {
             GenericStack[] possible = input.getPossibleInputs();
             if (possible == null || possible.length == 0) {
@@ -597,6 +681,11 @@ public final class PatternScanner {
                 continue;
             }
 
+            if (gridState == null) {
+                continue;
+            }
+            KeyCounter stored = gridState.stored();
+            ICraftingService crafting = gridState.crafting();
             boolean obtainable = false;
             for (GenericStack candidate : possible) {
                 if (candidate == null || candidate.what() == null) {
@@ -766,12 +855,15 @@ public final class PatternScanner {
     }
 
     private static int saturatedAdd(int value, long amount) {
-        return (int) Math.min(Integer.MAX_VALUE, (long) value + Math.max(0L, amount));
+        long positiveAmount = Math.max(0L, amount);
+        return (long) Integer.MAX_VALUE - value < positiveAmount
+                ? Integer.MAX_VALUE
+                : (int) ((long) value + positiveAmount);
     }
 
     private static long saturatedAdd(long value, long amount) {
         long positiveAmount = Math.max(0L, amount);
-        return Long.MAX_VALUE - value < positiveAmount ? Long.MAX_VALUE : value + positiveAmount;
+        return value > Long.MAX_VALUE - positiveAmount ? Long.MAX_VALUE : value + positiveAmount;
     }
 
     private static Component describeOutputs(IPatternDetails details) {
@@ -814,7 +906,8 @@ public final class PatternScanner {
 
     private static void checkProcessingPattern(IPatternDetails details, Component patternName, String location,
                                                BlockPos pos, List<PatternIssue> issues,
-                                               ProcessingMachineResult machineResult) {
+                                               ProcessingMachineResult machineResult,
+                                               boolean allowsReusableOutputs) {
         String issueKey = switch (machineResult) {
             case NO_TARGET -> "patternchecker.issue.processing.noTarget";
             case WRONG_MACHINE -> "patternchecker.issue.processing.wrongMachine";
@@ -851,6 +944,12 @@ public final class PatternScanner {
         }
 
         // An output identical to an input usually means a misconfigured loop.
+        // Some registered recipes deliberately return a reusable input: Ars
+        // imbuement keeps pedestal items, while IE bottling recipes can return
+        // their mold. Only suppress the warning after an exact recipe match.
+        if (allowsReusableOutputs) {
+            return;
+        }
         Set<AEKey> inputKeys = new HashSet<>();
         for (IPatternDetails.IInput input : details.getInputs()) {
             for (GenericStack candidate : input.getPossibleInputs()) {
@@ -868,6 +967,23 @@ public final class PatternScanner {
             }
         }
 
+    }
+
+    private static boolean allowsReusableProcessingOutputs(
+            Level level, IPatternDetails details, ScanContext context) {
+        RecipeType<?> imbuement = recipeType("ars_nouveau:imbuement");
+        if (imbuement != null
+                && hasMatchingMachineRecipe(level, details, imbuement, null, context)) {
+            return true;
+        }
+        for (String identifier : IMMERSIVE_ENGINEERING_PROCESSING_TYPES) {
+            RecipeType<?> type = recipeType(identifier);
+            if (type != null
+                    && hasMatchingMachineRecipe(level, details, type, null, context)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -902,8 +1018,7 @@ public final class PatternScanner {
             if (machineId != null && !machineId.equals(recipe.machineId())) {
                 continue;
             }
-            for (long scale : matchingRecipeScales(
-                    details, recipe.outputs(), recipe.requireAllOutputs())) {
+            for (long scale : matchingRecipeScales(details, recipe, inputs)) {
                 if (matchesRecipeInputsExactly(recipe.requirements(), inputs, scale)) {
                     context.machineRecipeMatches.put(cacheKey, true);
                     return true;
@@ -929,8 +1044,8 @@ public final class PatternScanner {
      * required.
      */
     private static Set<Long> matchingRecipeScales(IPatternDetails details,
-                                                  List<RecipeOutput> recipeOutputs,
-                                                  boolean requireAllOutputs) {
+                                                  PreparedRecipe recipe,
+                                                  List<PatternInputSlot> inputs) {
         Map<String, Long> patternAmounts = new LinkedHashMap<>();
         for (GenericStack output : details.getOutputs()) {
             if (output == null || !(output.what() instanceof AEKey key) || output.amount() <= 0) {
@@ -939,19 +1054,50 @@ public final class PatternScanner {
             patternAmounts.merge(key.getId().toString(), output.amount(), PatternScanner::saturatedAdd);
         }
         Map<String, Long> recipeAmounts = new LinkedHashMap<>();
-        for (RecipeOutput output : recipeOutputs) {
+        for (RecipeOutput output : recipe.outputs()) {
             recipeAmounts.merge(output.identifier(), Math.max(1L, output.amount()),
                     PatternScanner::saturatedAdd);
         }
-        if (requireAllOutputs && !patternAmounts.keySet().equals(recipeAmounts.keySet())) {
+        if (recipe.requireAllOutputs() && !patternAmounts.keySet().equals(recipeAmounts.keySet())) {
             return Set.of();
+        }
+        boolean mainOutputOnly = matchesByMainOutputOnly(recipe.type());
+        if (!mainOutputOnly && !recipeAmounts.keySet().containsAll(patternAmounts.keySet())) {
+            return Set.of();
+        }
+
+        // Occultism crusher and crystallizer spirits apply a configurable
+        // output multiplier after the recipe has assembled. The recipe itself
+        // therefore cannot provide a stable output count. Keep validating the
+        // output identity, then derive operation counts from the encoded input
+        // instead of treating a configured multiplier as a broken pattern.
+        if (recipe.dynamicOutputAmount()) {
+            Set<Long> inputScales = new HashSet<>(Set.of(1L));
+            for (RecipeRequirement requirement : recipe.requirements()) {
+                long required = Math.max(1L, requirement.amount());
+                for (PatternInputSlot slot : inputs) {
+                    for (PatternInputCandidate candidate : slot.candidates()) {
+                        if (matchesRequirement(requirement, candidate)
+                                && candidate.amount() % required == 0) {
+                            inputScales.add(candidate.amount() / required);
+                        }
+                    }
+                }
+            }
+            inputScales.removeIf(scale -> scale <= 0);
+            return inputScales;
         }
 
         Set<Long> scales = null;
         for (Map.Entry<String, Long> patternOutput : patternAmounts.entrySet()) {
             Long recipeAmount = recipeAmounts.get(patternOutput.getKey());
-            if (recipeAmount == null || recipeAmount <= 0
-                    || patternOutput.getValue() % recipeAmount != 0) {
+            if (recipeAmount == null) {
+                if (mainOutputOnly) {
+                    continue;
+                }
+                return Set.of();
+            }
+            if (recipeAmount <= 0 || patternOutput.getValue() % recipeAmount != 0) {
                 return Set.of();
             }
             long scale = patternOutput.getValue() / recipeAmount;
@@ -964,7 +1110,97 @@ public final class PatternScanner {
                 return Set.of();
             }
         }
-        return scales == null ? Set.of() : scales;
+        if (scales == null) {
+            return Set.of();
+        }
+        if (mainOutputOnly) {
+            scales.removeIf(scale -> !allowsReusableRecipeOutputs(
+                    patternAmounts, recipeAmounts.keySet(), recipe.consumableRequirements(),
+                    recipe.reusableRequirements(), inputs, scale));
+        }
+        return scales;
+    }
+
+    private static boolean allowsReusableRecipeOutputs(
+            Map<String, Long> patternOutputs, Set<String> declaredOutputs,
+            List<RecipeRequirement> consumableRequirements,
+            List<RecipeRequirement> reusableRequirements,
+            List<PatternInputSlot> inputs, long scale) {
+        if (declaredOutputs.containsAll(patternOutputs.keySet())) {
+            return true;
+        }
+        Map<String, Long> encodedInputs = new HashMap<>();
+        for (PatternInputSlot slot : inputs) {
+            // A substitutable slot must not promise returns from mutually
+            // exclusive identities. Conservatively require a concrete choice.
+            if (slot.candidates().size() != 1) {
+                return false;
+            }
+            PatternInputCandidate input = slot.candidates().getFirst();
+            encodedInputs.merge(input.identifier(), input.amount(), PatternScanner::saturatedAdd);
+        }
+        try {
+            return ReusableOutputValidator.allowsAdditionalOutputs(patternOutputs, declaredOutputs,
+                    encodedInputs, scaledInputLimits(consumableRequirements, inputs, scale),
+                    scaledInputLimits(reusableRequirements, inputs, scale));
+        } catch (ArithmeticException ignored) {
+            return false;
+        }
+    }
+
+    private static List<ReusableOutputValidator.ReusableInput> scaledInputLimits(
+            List<RecipeRequirement> requirements, List<PatternInputSlot> inputs, long scale) {
+        List<ReusableOutputValidator.ReusableInput> limits = new ArrayList<>();
+        for (RecipeRequirement requirement : requirements) {
+            Set<String> acceptedIds = new HashSet<>();
+            for (PatternInputSlot slot : inputs) {
+                PatternInputCandidate input = slot.candidates().getFirst();
+                if (matchesRequirement(requirement, input)) {
+                    acceptedIds.add(input.identifier());
+                }
+            }
+            limits.add(new ReusableOutputValidator.ReusableInput(acceptedIds,
+                    Math.multiplyExact(requirement.amount(), scale)));
+        }
+        return limits;
+    }
+
+    private static List<RecipeRequirement> consumableRecipeRequirements(Recipe<?> recipe) {
+        if (!"ars_nouveau:imbuement".equals(recipeTypeId(recipe.getType()))) {
+            return List.of();
+        }
+        List<RecipeRequirement> consumable = new ArrayList<>();
+        addRecipeRequirements(consumable, firstMember(recipe, "getInput", "input"));
+        return List.copyOf(consumable);
+    }
+
+    private static List<RecipeRequirement> reusableRecipeRequirements(Recipe<?> recipe) {
+        if (!"ars_nouveau:imbuement".equals(recipeTypeId(recipe.getType()))) {
+            return List.of();
+        }
+        List<RecipeRequirement> reusable = new ArrayList<>();
+        addRecipeRequirements(reusable, firstMember(recipe, "getPedestalItems", "pedestalItems"));
+        return List.copyOf(reusable);
+    }
+
+    private static boolean matchesByMainOutputOnly(RecipeType<?> type) {
+        return switch (recipeTypeId(type)) {
+            // Ars automation commonly encodes reusable pedestal items as
+            // additional outputs. They are not part of getResultItem(), and
+            // their recovery depends on the surrounding automation layout.
+            case "ars_nouveau:imbuement" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean hasDynamicOutputAmount(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "occultism:crushing" ->
+                    !Boolean.TRUE.equals(firstMember(recipe, "getIgnoreCrushingMultiplier"));
+            case "occultism:crystallize" ->
+                    !Boolean.TRUE.equals(firstMember(recipe, "getIgnoreCrystallizeMultiplier"));
+            default -> false;
+        };
     }
 
     private static boolean requiresAllRecipeOutputs(Recipe<?> recipe) {
@@ -1148,16 +1384,18 @@ public final class PatternScanner {
         }
     }
 
-    private static void logMachineMismatch(Object host, BlockPos pos, IPatternDetails details,
+    private static void logMachineMismatch(Object host, Level level, BlockPos pos,
+                                           IPatternDetails details,
                                            ProcessingMachineResult result, ScanContext context) {
         if (host == null || pos == null) {
             return;
         }
-        String diagnosticKey = pos.asLong() + ":" + result + ":" + duplicateSignature(details);
+        String diagnosticKey = level.dimension().location() + ":" + pos.asLong()
+                + ":" + result + ":" + duplicateSignature(details);
         if (!context.loggedMachineMismatches.add(diagnosticKey)) {
             return;
         }
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         List<String> recipeTypes = machine.types().stream()
                 .map(PatternScanner::recipeTypeId)
                 .sorted()
@@ -1242,6 +1480,22 @@ public final class PatternScanner {
                     aliases("getOutput", "output"), aliases("getResult", "result"),
                     aliases("getOutputState", "outputState"),
                     aliases("getFluidOutput", "fluidOutput", "outputFluid"));
+            case "oritech" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getResults", "results"),
+                    aliases("getFluidOutputs", "fluidOutputs"));
+            case "actuallyadditions" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getOutput", "output"),
+                    aliases("getOutputOne", "outputOne"),
+                    aliases("getOutputTwo", "outputTwo"));
+            // Occultism ritual automation encodes the JEI/EMI ritual dummy as
+            // the processing-pattern output. The actual ritual result can be
+            // an entity, a command side effect, or a different item entirely,
+            // so getResultItem() alone cannot be used to find the recipe.
+            case "occultism" -> recipeOutputsFromMembers(recipe, registryAccess,
+                    aliases("getRitualDummy"));
+            case "immersiveengineering" ->
+                    immersiveEngineeringRecipeOutputs(recipe, registryAccess);
+            case "malum" -> malumRecipeOutputs(recipe, registryAccess);
             case "ifeu" -> recipeOutputsFromMembers(recipe, registryAccess,
                     aliases("output", "getOutput"));
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1324,6 +1578,46 @@ public final class PatternScanner {
         List<RecipeOutput> outputs = new ArrayList<>();
         addRecipeOutput(outputs, recipe.getResultItem(registryAccess));
         return outputs;
+    }
+
+    private static List<RecipeOutput> immersiveEngineeringRecipeOutputs(
+            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+        List<RecipeOutput> outputs = recipeOutputsFromMembers(recipe, registryAccess,
+                aliases("getItemOutputs"), aliases("getFluidOutputs"),
+                aliases("output", "getOutput"),
+                aliases("itemOutput", "getItemOutput"),
+                aliases("fluidOutput", "getFluidOutput"),
+                aliases("slag"), aliases("secondaryOutputs"),
+                aliases("stripped"), aliases("secondaryStripping"));
+        if ("immersiveengineering:coke_oven".equals(recipeTypeId(recipe.getType()))) {
+            Object rawCreosote = firstMember(recipe, "creosoteOutput");
+            if (rawCreosote instanceof Number amount && amount.longValue() > 0) {
+                addUniqueRecipeOutput(outputs, "immersiveengineering:creosote", amount.longValue());
+            }
+        }
+        return outputs;
+    }
+
+    private static List<RecipeOutput> malumRecipeOutputs(
+            Recipe<?> recipe, net.minecraft.core.HolderLookup.Provider registryAccess) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "malum:spirit_infusion" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("result"));
+            case "malum:spirit_focusing" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("getOutputRaw", "createOutput", "output"));
+            case "malum:runeworking" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("output"));
+            case "malum:void_favor" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("result"));
+            case "malum:conjuncture_crystallarium" ->
+                    recipeOutputsFromMembers(recipe, registryAccess,
+                            aliases("getFurnaceResults"), aliases("getResultFallback"));
+            default -> List.of();
+        };
     }
 
     private static List<RecipeOutput> recipeOutputsFromMembers(
@@ -1442,7 +1736,7 @@ public final class PatternScanner {
                 "getItems", "items",
                 "getMainOutput", "mainOutput", "getMaxSecondaryOutput", "maxSecondaryOutput",
                 "getSecondaryOutput", "secondaryOutput", "getFluid", "fluid", "getFluids",
-                "fluids", "getChemical", "chemical", "resolve", "left", "right"
+                "fluids", "getChemical", "chemical", "resolve", "get", "left", "right"
         }) {
             Object nested = readMember(value, member);
             if (nested != null && nested != value) {
@@ -1535,19 +1829,6 @@ public final class PatternScanner {
         if (typeId.equals("jdte:bio_factory")) {
             return bioFactoryRequirements(recipe);
         }
-        if (typeId.equals("mysticalagriculture:infusion")
-                || typeId.equals("mysticalagriculture:awakening")) {
-            // Mystical Agriculture keeps the central altar input separate
-            // from Recipe#getIngredients(). Awakening also consumes counted
-            // essences; omitting either would accept an incomplete pattern.
-            List<RecipeRequirement> requirements = genericRecipeRequirements(recipe);
-            addRecipeRequirements(requirements,
-                    firstMember(recipe, "getAltarIngredient", "altarIngredient"));
-            if (typeId.equals("mysticalagriculture:awakening")) {
-                addRecipeRequirements(requirements, firstMember(recipe, "getEssences", "essences"));
-            }
-            return requirements;
-        }
         return switch (recipeNamespace(recipe)) {
             case "mekanism" -> recipeRequirementsFromMembers(recipe,
                     aliases("getInput", "input"),
@@ -1586,6 +1867,20 @@ public final class PatternScanner {
                     aliases("getIngredient", "ingredient"),
                     aliases("getFluidInput", "fluidInput", "inputFluid"),
                     aliases("getCatalyst", "catalyst"));
+            case "oritech" -> recipeRequirementsFromMembers(recipe,
+                    aliases("getInputs", "inputs"),
+                    aliases("getFluidInput", "fluidInput"));
+            case "actuallyadditions" -> recipeRequirementsFromMembers(recipe,
+                    aliases("getInput", "input"), aliases("getIngredient", "ingredient"),
+                    aliases("getStandOne", "standOne"),
+                    aliases("getStandTwo", "standTwo"),
+                    aliases("getStandThree", "standThree"),
+                    aliases("getStandFour", "standFour"));
+            case "occultism" -> occultismRecipeRequirements(recipe);
+            case "mysticalagriculture" -> mysticalAgricultureRecipeRequirements(recipe);
+            case "ars_nouveau" -> arsNouveauRecipeRequirements(recipe);
+            case "immersiveengineering" -> immersiveEngineeringRecipeRequirements(recipe);
+            case "malum" -> malumRecipeRequirements(recipe);
             case "ifeu" -> ifeuRecipeRequirements(recipe);
             case "draconicevolution" -> draconicFusionRequirements(recipe);
             case "productivebees", "resourcefulbees", "beesourceful" ->
@@ -1608,6 +1903,133 @@ public final class PatternScanner {
                             aliases("getFluidInputs", "fluidInputs"));
             case "enderio" -> enderIoRecipeRequirements(recipe);
             default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    private static List<RecipeRequirement> occultismRecipeRequirements(Recipe<?> recipe) {
+        if ("occultism:ritual".equals(recipeTypeId(recipe.getType()))) {
+            return recipeRequirementsFromMembers(recipe,
+                    aliases("getActivationItem"), aliases("getIngredients"));
+        }
+        return genericRecipeRequirements(recipe);
+    }
+
+    private static List<RecipeRequirement> mysticalAgricultureRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            // The infusion recipe deliberately omits the central altar
+            // ingredient from Recipe#getIngredients().
+            case "mysticalagriculture:infusion" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getAltarIngredient"), aliases("getIngredients"));
+            case "mysticalagriculture:awakening" ->
+                    mysticalAgricultureAwakeningRequirements(recipe);
+            default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    /**
+     * AwakeningRecipe exposes its four essence stacks as plain Ingredients,
+     * which drops their stack counts (commonly 10 or 20). Pair those entries
+     * back with getEssences() so the encoded processing pattern is checked
+     * against the quantities the altar actually consumes.
+     */
+    private static List<RecipeRequirement> mysticalAgricultureAwakeningRequirements(
+            Recipe<?> recipe) {
+        List<RecipeRequirement> requirements = new ArrayList<>();
+        addRecipeRequirements(requirements, firstMember(recipe, "getAltarIngredient"));
+
+        List<ItemStack> essences = new ArrayList<>();
+        Object rawEssences = firstMember(recipe, "getEssences");
+        if (rawEssences instanceof Iterable<?> iterable) {
+            for (Object entry : iterable) {
+                if (entry instanceof ItemStack stack && !stack.isEmpty()) {
+                    essences.add(stack);
+                }
+            }
+        }
+        boolean[] usedEssences = new boolean[essences.size()];
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (ingredient == null || ingredient.isEmpty()) {
+                continue;
+            }
+            ItemStack matchedEssence = ItemStack.EMPTY;
+            int matchedIndex = -1;
+            for (int i = 0; i < essences.size(); i++) {
+                if (!usedEssences[i] && ingredient.test(essences.get(i))) {
+                    matchedEssence = essences.get(i);
+                    matchedIndex = i;
+                    break;
+                }
+            }
+            if (matchedIndex >= 0) {
+                usedEssences[matchedIndex] = true;
+                requirements.add(new RecipeRequirement(
+                        ingredient, Set.of(), matchedEssence.getCount()));
+            } else {
+                requirements.add(new RecipeRequirement(ingredient, Set.of(), 1L));
+            }
+        }
+        return requirements;
+    }
+
+    private static List<RecipeRequirement> arsNouveauRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            // The apparatus catalyst/reagent is stored separately from the
+            // surrounding pedestal ingredients.
+            case "ars_nouveau:enchanting_apparatus" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("reagent"), aliases("pedestalItems"));
+            // The chamber input is likewise separate from its optional
+            // pedestal accelerants/catalysts.
+            case "ars_nouveau:imbuement" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getInput", "input"),
+                            aliases("getPedestalItems", "pedestalItems"));
+            default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    private static List<RecipeRequirement> immersiveEngineeringRecipeRequirements(
+            Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "immersiveengineering:alloy" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input0"), aliases("input1"));
+            case "immersiveengineering:blast_furnace",
+                    "immersiveengineering:coke_oven" ->
+                    recipeRequirementsFromMembers(recipe, aliases("input"));
+            case "immersiveengineering:arc_furnace",
+                    "immersiveengineering:blueprint",
+                    "immersiveengineering:bottling_machine",
+                    "immersiveengineering:crusher",
+                    "immersiveengineering:fermenter",
+                    "immersiveengineering:metal_press",
+                    "immersiveengineering:mixer",
+                    "immersiveengineering:refinery",
+                    "immersiveengineering:sawmill",
+                    "immersiveengineering:squeezer" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getItemInputs"), aliases("getFluidInputs"));
+            default -> genericRecipeRequirements(recipe);
+        };
+    }
+
+    private static List<RecipeRequirement> malumRecipeRequirements(Recipe<?> recipe) {
+        return switch (recipeTypeId(recipe.getType())) {
+            case "malum:spirit_infusion" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input"), aliases("extraInputs"), aliases("spirits"));
+            case "malum:spirit_focusing" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("getInput", "input"), aliases("getSpirits", "spirits"));
+            case "malum:runeworking" ->
+                    recipeRequirementsFromMembers(recipe,
+                            aliases("input"), aliases("secondaryInput"));
+            case "malum:void_favor" ->
+                    recipeRequirementsFromMembers(recipe, aliases("input"));
+            case "malum:conjuncture_crystallarium" ->
+                    recipeRequirementsFromMembers(recipe, aliases("getInput"));
+            default -> List.of();
         };
     }
 
@@ -1782,7 +2204,8 @@ public final class PatternScanner {
             return null;
         }
         long amount = numericAmount(input, 1L);
-        Object ingredient = invokeNoArg(input, "getIngredient", "ingredient");
+        Object ingredient = invokeNoArg(input,
+                "getIngredient", "ingredient", "getBaseIngredient");
         if (ingredient == null) {
             ingredient = input;
         } else {
@@ -1802,6 +2225,10 @@ public final class PatternScanner {
                     : new RecipeRequirement(itemIngredient, Set.of(), Math.max(1L, amount));
         }
         Set<String> identifiers = identifiersFrom(ingredient);
+        // Oritech represents an absent fluid input with a zero-amount
+        // FluidIngredient whose resolved registry value is Fluids.EMPTY.
+        // It is a sentinel, not an input that a processing pattern must supply.
+        identifiers.remove("minecraft:empty");
         return identifiers.isEmpty()
                 ? null
                 : new RecipeRequirement(null, identifiers, Math.max(1L, amount));
@@ -1842,7 +2269,7 @@ public final class PatternScanner {
             identifiers.add(direct);
         }
         Object representations = invokeNoArg(value, "getRepresentations", "representations",
-                "getChemicalStacks", "getStacks", "getFluids", "getItems");
+                "getChemicalStacks", "getStacks", "getFluidStacks", "getFluids", "getItems");
         if (representations instanceof Iterable<?> iterable) {
             for (Object representation : iterable) {
                 String identifier = resourceIdentifier(representation);
@@ -1964,12 +2391,12 @@ public final class PatternScanner {
             return checkAe2LtPackagedProvider(host, level, pos, details, context);
         }
 
-        MachineState machine = context.machineState(host, pos);
+        MachineState machine = context.machineState(host, level, pos);
         Set<RecipeType<?>> types = machine.types();
-        boolean hasTarget = machine.hasTarget();
-        boolean craftingOnly = machine.craftingOnly();
+        DispatchTargetPolicy.Rejection targetRejection =
+                DispatchTargetPolicy.check(dispatchTarget(machine), true);
 
-        if (!hasTarget) {
+        if (targetRejection == DispatchTargetPolicy.Rejection.NO_TARGET) {
             return ProcessingMachineResult.NO_TARGET;
         }
         if (machine.universalRecipeExecutor()) {
@@ -1989,12 +2416,7 @@ public final class PatternScanner {
         }
         // Molecular assemblers accept AE2 crafting plans, but processing
         // patterns are not crafting recipes and can never run in them.
-        if (craftingOnly && types.isEmpty()) {
-            return ProcessingMachineResult.WRONG_MACHINE;
-        }
-        if (machine.knownNonProcessingTarget() && !machine.unknownAddonTarget()
-                && !machine.contextualMagicTarget()
-                && types.isEmpty()) {
+        if (targetRejection == DispatchTargetPolicy.Rejection.WRONG_MACHINE) {
             return ProcessingMachineResult.WRONG_MACHINE;
         }
 
@@ -2043,6 +2465,42 @@ public final class PatternScanner {
                 || hasNonItemIO(details)
                 ? ProcessingMachineResult.UNKNOWN
                 : ProcessingMachineResult.NO_RECIPE;
+    }
+
+    private static RecipeType<?> recipeType(String identifier) {
+        ResourceLocation id = ResourceLocation.parse(identifier);
+        RecipeType<?> type = BuiltInRegistries.RECIPE_TYPE.get(id);
+        return type != null && id.equals(BuiltInRegistries.RECIPE_TYPE.getKey(type))
+                ? type
+                : null;
+    }
+
+    private static DispatchTargetPolicy.Target dispatchTarget(MachineState machine) {
+        return new DispatchTargetPolicy.Target(machine.hasTarget(), machine.craftingOnly(),
+                machine.acceptsPlans(), !machine.types().isEmpty(), machine.knownNonProcessingTarget(),
+                machine.unknownAddonTarget(), machine.contextualMagicTarget(),
+                machine.universalRecipeExecutor());
+    }
+
+    private static ProcessingMachineResult checkVirtualDispatchTarget(
+            Object host, Level level, BlockPos pos, IPatternDetails details,
+            boolean processing, ScanContext context) {
+        if (host == null || pos == null) {
+            return ProcessingMachineResult.UNKNOWN;
+        }
+        // Packaged executors still need a successful adapter binding before a
+        // batch can be dispatched. A virtual completion card cannot create it.
+        if (isAe2LtPackagedPatternProvider(host)) {
+            return checkAe2LtPackagedProvider(host, level, pos, details, context);
+        }
+        MachineState machine = context.machineState(host, level, pos);
+        return switch (DispatchTargetPolicy.check(dispatchTarget(machine), processing)) {
+            case NO_TARGET -> ProcessingMachineResult.NO_TARGET;
+            case WRONG_MACHINE -> ProcessingMachineResult.WRONG_MACHINE;
+            // Successful insertion and machine operation require runtime state.
+            // Virtual completion never certifies an encoded output as real.
+            case NONE -> ProcessingMachineResult.UNKNOWN;
+        };
     }
 
     /**
@@ -2521,7 +2979,14 @@ public final class PatternScanner {
                 || namespace.equals("justdirethings")
                 || namespace.equals("justdynathings")
                 || namespace.equals("jdte")
-                || namespace.equals("industrialforegoing");
+                || namespace.equals("industrialforegoing")
+                || namespace.equals("oritech")
+                || namespace.equals("actuallyadditions")
+                || namespace.equals("occultism")
+                || namespace.equals("mysticalagriculture")
+                || namespace.equals("ars_nouveau")
+                || namespace.equals("immersiveengineering")
+                || namespace.equals("malum");
         if (!optionalMachineMod || namespace.equals("ae2")
                 || isCraftingOnlyBlock(block) || isCrystalGrowthChamber(block)
                 || isAe2LtUniversalRecipeExecutor(block)
@@ -2788,6 +3253,73 @@ public final class PatternScanner {
                     List.of("productivebees:centrifuge");
             case "productivebees:bottler" ->
                     List.of("productivebees:bottler");
+            case "oritech:pulverizer_block" ->
+                    List.of("oritech:pulverizer");
+            case "oritech:fragment_forge_block" ->
+                    List.of("oritech:grinder");
+            case "oritech:assembler_block" ->
+                    List.of("oritech:assembler");
+            case "oritech:foundry_block" ->
+                    List.of("oritech:foundry");
+            case "oritech:refinery_block", "oritech:tainted_refinery_block" ->
+                    List.of("oritech:refinery");
+            case "oritech:cooler_block" ->
+                    List.of("oritech:cooler");
+            case "oritech:centrifuge_block" ->
+                    List.of("oritech:centrifuge", "oritech:centrifuge_fluid");
+            case "oritech:atomic_forge_block" ->
+                    List.of("oritech:atomic_forge");
+            case "oritech:powered_furnace_block" ->
+                    List.of("minecraft:smelting");
+            case "oritech:laser_arm_block" ->
+                    List.of("oritech:laser");
+            case "oritech:deep_drill_block" ->
+                    List.of("oritech:deep_drill");
+            case "oritech:accelerator_controller" ->
+                    List.of("oritech:particle_collision");
+            case "actuallyadditions:crusher", "actuallyadditions:crusher_double" ->
+                    List.of("actuallyadditions:crushing");
+            case "actuallyadditions:powered_furnace" ->
+                    List.of("minecraft:smelting");
+            case "actuallyadditions:canola_press" ->
+                    List.of("actuallyadditions:pressing");
+            case "actuallyadditions:fermenting_barrel" ->
+                    List.of("actuallyadditions:fermenting");
+            case "actuallyadditions:atomic_reconstructor" ->
+                    List.of("actuallyadditions:laser");
+            case "actuallyadditions:empowerer" ->
+                    List.of("actuallyadditions:empower");
+            case "occultism:spirit_fire" ->
+                    List.of("occultism:spirit_fire");
+            case "occultism:golden_sacrificial_bowl",
+                    "occultism:dark_golden_sacrificial_bowl",
+                    "occultism:iesnium_sacrificial_bowl",
+                    "occultism:dark_iesnium_sacrificial_bowl" ->
+                    List.of("occultism:ritual");
+            case "mysticalagriculture:infusion_altar" ->
+                    List.of("mysticalagriculture:infusion");
+            case "mysticalagriculture:awakening_altar" ->
+                    List.of("mysticalagriculture:awakening");
+            case "mysticalagriculture:furnace" ->
+                    List.of("minecraft:smelting");
+            case "mysticalagriculture:seed_reprocessor" ->
+                    List.of("mysticalagriculture:reprocessor");
+            case "mysticalagriculture:soul_extractor" ->
+                    List.of("mysticalagriculture:soul_extraction");
+            case "ars_nouveau:enchanting_apparatus" ->
+                    List.of("ars_nouveau:enchanting_apparatus");
+            case "ars_nouveau:imbuement_chamber" ->
+                    List.of("ars_nouveau:imbuement");
+            case "malum:spirit_altar" ->
+                    List.of("malum:spirit_infusion");
+            case "malum:spirit_crucible" ->
+                    List.of("malum:spirit_focusing");
+            case "malum:runic_workbench" ->
+                    List.of("malum:runeworking");
+            case "malum:weeping_well_centerpiece" ->
+                    List.of("malum:void_favor");
+            case "malum:conjuncture_crystallarium" ->
+                    List.of("malum:conjuncture_crystallarium");
             default -> List.of();
         };
     }

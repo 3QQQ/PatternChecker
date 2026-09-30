@@ -337,19 +337,19 @@ public class PatternCheckScreen extends AbstractContainerScreen<PatternCheckMenu
         gui.drawString(this.font, this.font.plainSubstrByWidth(status.getString(), maxWidth),
                 OUTER_PADDING, statusY, payload.bound() ? ACCENT_COLOR : DIM_TEXT_COLOR, false);
 
-        String secondLine;
-        int secondLineColor;
         if (!payload.notice().getString().isEmpty()) {
-            secondLine = payload.notice().getString();
-            secondLineColor = ACCENT_COLOR;
+            List<FormattedCharSequence> noticeLines = this.font.split(payload.notice(), maxWidth);
+            for (int i = 0; i < Math.min(2, noticeLines.size()); i++) {
+                gui.drawString(this.font, noticeLines.get(i),
+                        OUTER_PADDING, statusY + 10 + i * 10, ACCENT_COLOR, false);
+            }
         } else {
-            secondLine = selectedEntry() != null
+            String secondLine = selectedEntry() != null
                     ? Component.translatable("patternchecker.menu.hoverHint").getString()
                     : Component.translatable("patternchecker.menu.selectHint").getString();
-            secondLineColor = DIM_TEXT_COLOR;
+            gui.drawString(this.font, this.font.plainSubstrByWidth(secondLine, maxWidth),
+                    OUTER_PADDING, statusY + 10, DIM_TEXT_COLOR, false);
         }
-        gui.drawString(this.font, this.font.plainSubstrByWidth(secondLine, maxWidth),
-                OUTER_PADDING, statusY + 10, secondLineColor, false);
     }
 
     @Override
