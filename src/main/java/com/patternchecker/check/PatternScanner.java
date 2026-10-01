@@ -451,7 +451,14 @@ public final class PatternScanner {
                     provider ? "patternchecker.location.provider"
                             : "patternchecker.location.container");
         }
-        return customName.getString() + " [" + pos.toShortString() + "]";
+        return formatContainerLocation(customName.getString(), level.dimension().location(), pos);
+    }
+
+    // Location is also part of the client selection key. Include the stable
+    // dimension ID so providers at matching coordinates in separate worlds
+    // cannot restore selection to each other's pattern slots.
+    static String formatContainerLocation(String name, ResourceLocation dimensionId, BlockPos pos) {
+        return name + " [" + dimensionId + " " + pos.toShortString() + "]";
     }
 
     private static final class RecipeIndex {
