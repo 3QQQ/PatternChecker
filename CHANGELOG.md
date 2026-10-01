@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.5 - 2026-10-01
+
+Minecraft 1.21.1 / NeoForge.
+
+### Added
+
+- Added machine-aware recipe checks for Mystical Automation infusion and
+  awakening, including the central ingredient, counted essences and input side.
+- Recognized Mekanism Magic processing machines and non-pattern targets.
+  Context-dependent recipes are shown as unverified instead of being reported
+  as missing.
+- Expanded processing recipe handling for Ars Nouveau, Immersive Engineering,
+  Mystical Agriculture and other supported machines, including reusable
+  ingredients and dynamic outputs.
+- Added virtual-completion pattern statistics without bypassing decoding,
+  input availability or dispatch-target checks.
+
+### Fixed
+
+- Prevented false invalid-pattern reports for fluid substitution and shapeless
+  crafting patterns.
+- Restored the selected pattern near its previous position when reopening the
+  checker, and cleared stale tool state when opening another terminal.
+- Distinguished same-name, same-coordinate pattern providers in different
+  dimensions during selection restoration.
+- Corrected provider-world lookup, loose-container counting, target validation
+  and extra-output allocation.
+
 ## 1.0.4 - 2026-09-19
 
 Minecraft 1.20.1 / Forge and Minecraft 1.21.1 / NeoForge.

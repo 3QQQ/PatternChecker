@@ -1,0 +1,2 @@
+2231b71e5b3d592a5a8221bddc66160ae860a328d40197c1c1e6a2ee2778dea8  patternchecker-mc1.20.1-1.0.5.jar
+b140becd230e3c84b54eb0eae51a2e0094f3762abf70932fbb742f53e2e32678  patternchecker-mc1.21.1-1.0.5.jar
