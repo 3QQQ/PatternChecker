@@ -1,5 +1,7 @@
 package com.patternchecker.check;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -7,9 +9,23 @@ import org.junit.jupiter.params.provider.CsvSource;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PatternScannerTest {
+    @Test
+    void providerLocationDistinguishesDimensionsAtTheSameCoordinates() {
+        BlockPos pos = new BlockPos(43, 68, 24);
+        String overworld = PatternScanner.formatContainerLocation("Pattern Provider",
+                ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), pos);
+        String nether = PatternScanner.formatContainerLocation("Pattern Provider",
+                ResourceLocation.fromNamespaceAndPath("minecraft", "the_nether"), pos);
+
+        assertNotEquals(overworld, nether);
+        assertEquals(overworld, PatternScanner.formatContainerLocation("Pattern Provider",
+                ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), pos));
+    }
+
     @ParameterizedTest
     @CsvSource({
             "0, 0, 0",

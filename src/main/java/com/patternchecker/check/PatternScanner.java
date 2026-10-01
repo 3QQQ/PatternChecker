@@ -364,7 +364,7 @@ public final class PatternScanner {
             }
         }
         BlockPos pos = be.getBlockPos();
-        String location = describeContainer(owner, be, provider, pos);
+        String location = describeContainer(owner, be, providerLevel, provider, pos);
         Map<AEItemKey, List<IPatternDetails>> providerDetails = new HashMap<>();
         if (owner instanceof PatternProviderLogicHost host) {
             try {
@@ -407,7 +407,7 @@ public final class PatternScanner {
 
     private static String describeContainer(
             Object owner, BlockEntity blockEntity,
-            boolean provider, BlockPos pos) {
+            Level providerLevel, boolean provider, BlockPos pos) {
         Component customName = null;
         Object ownerName = readMember(owner, "getCustomName");
         if (ownerName instanceof Component component) {
@@ -421,7 +421,14 @@ public final class PatternScanner {
                     provider ? "patternchecker.location.provider"
                             : "patternchecker.location.container");
         }
-        return customName.getString() + " [" + pos.toShortString() + "]";
+        return formatContainerLocation(
+                customName.getString(), providerLevel.dimension().location(), pos);
+    }
+
+    static String formatContainerLocation(String name, ResourceLocation dimensionId, BlockPos pos) {
+        // Selection is restored by location and slot. Coordinates alone can
+        // identify different providers on one cross-dimensional ME network.
+        return name + " [" + dimensionId + " " + pos.toShortString() + "]";
     }
 
     /**
