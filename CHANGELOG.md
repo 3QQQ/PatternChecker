@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.5 - 2026-10-01
+
+Minecraft 1.20.1 / Forge.
+
+### Added
+
+- Recognized the released Mekanism Magic spirit processors, factories and
+  ritual machines without reporting their context-dependent recipes as
+  missing; classified its dimension miner as a non-pattern target.
+
+### Fixed
+
+- Prevented false invalid-pattern reports for fluid substitution and shapeless
+  crafting patterns.
+- Restored the selected pattern near its previous position when reopening the
+  checker, and cleared stale tool state when opening another terminal.
+- Distinguished same-name, same-coordinate pattern providers in different
+  dimensions during selection restoration.
+- Used each container's world when scanning cross-dimensional networks and
+  preserved input warnings when a loose container has no network.
+- Saturated pattern counts instead of overflowing on large inventories.
+
 ## 1.0.4 - 2026-09-19
 
 ### Added
